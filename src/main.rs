@@ -35,8 +35,8 @@ const SEA_LEVEL: f32 = 0.12;
 // todo:
 // - [x] good aero model
 // - [x] joystick
-// - [ ] better plane model
-//     - [ ] hat to move view (or arrow keys)
+// - [x] better plane model
+//     - [x] hat to move view (or arrow keys)
 // - [ ] better worldgen model (like 100km, real maps, hawaii, denver)
 // - [ ] weather, wind, time of day
 // - [ ] ground collision
@@ -232,6 +232,7 @@ impl Scene for FlightSim {
             (self.prop_angle + self.prop_rps * std::f32::consts::TAU * dt) % std::f32::consts::TAU;
 
         let forward = nalgebra_glm::quat_rotate_vec3(&self.plane.orientation, &vec3(1.0, 0.0, 0.0));
+        let right = nalgebra_glm::quat_rotate_vec3(&self.plane.orientation, &vec3(0.0, 0.0, 1.0));
         let up = nalgebra_glm::quat_rotate_vec3(&self.plane.orientation, &vec3(0.0, 1.0, 0.0));
 
         // Extract normalized velocity direction to feel sideways/vertical drift (AoA/sideslip)
@@ -242,16 +243,19 @@ impl Scene for FlightSim {
             forward
         };
 
-        // Blend forward vector with velocity vector to give that "heavy physics" feel
-        // (0.8 facing, 0.2 actual momentum vector)
-        let chase_dir = forward * 0.8 + vel_dir * 0.2;
+        // Blend forward vector with velocity vector to give that in flight feel
+        let chase_dir = (forward * 0.8 + vel_dir * 0.2).normalize();
+
+        // Orbit around the plane
+        let max_pan = std::f32::consts::PI * 0.5; // TODO: Could be a setting?
+        let view_dir = nalgebra_glm::rotate_vec3(&chase_dir, -self.controls.pan * max_pan, &up);
 
         // Position camera behind and slightly above the blended vector
-        let cam_pos = self.plane.pos - chase_dir * 25.0 + up * 6.0;
+        let cam_pos = self.plane.pos - view_dir * 25.0 + up * 6.0;
 
         let camera = Camera::new(
             cam_pos,
-            self.plane.pos + forward * 10.0, // Look ahead of the plane
+            self.plane.pos + view_dir * 10.0, // Look ahead of the plane
             up,
             ProjectionKind::default(),
         );
