@@ -5,25 +5,32 @@ use apricot::{
     height_grid::HeightGrid,
     input::Scancode,
     mesh_data::MeshData,
-    render_core::{MeshId, TextureId},
+    rectangle::Rectangle,
+    render_core::{MeshId, RenderContext, TextureId},
     shadow_map::DirectionalLight,
 };
 use nalgebra_glm::{vec2, vec3, vec4, Mat4, Vec2};
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 
-use crate::{airplane::Airplane, config::AirplaneConfig, control::Controls};
+use crate::{
+    airplane::Airplane,
+    config::AirplaneConfig,
+    control::Controls,
+    hud::{GAP, MARGIN, PAD},
+};
 
 mod airplane;
 mod config;
 mod control;
+mod hud;
 
 const CELLS: u32 = 500;
-const HEIGHT: f32 = 30.0;
+const HEIGHT: f32 = 40.0;
 const SEA_LEVEL: f32 = 0.12;
 
 // todo:
 // - [x] good aero model
-// - [ ] joystick
+// - [x] joystick
 // - [ ] better plane model
 // - [ ] better worldgen model (like 100km, real maps, hawaii, denver)
 // - [ ] weather, wind, time of day
@@ -74,6 +81,97 @@ impl FlightSim {
             plane: Airplane::new(AirplaneConfig::cessna172()),
             controls: Controls::new(),
         }
+    }
+
+    fn draw_hud(&self, app: &App) {
+        let renderer = &app.renderer;
+        let screen = renderer.screen_size();
+        let (sw, sh) = (screen.x as f32, screen.y as f32);
+
+        self.draw_flight_panel(renderer, sw, sh);
+        self.draw_engine_panel(renderer, sh);
+    }
+
+    /// Draw attitude indicator stacked on the compass
+    fn draw_flight_panel(&self, renderer: &RenderContext, sw: f32, sh: f32) {
+        let r = 75.0;
+        let compass_h = 26.0;
+
+        let plate_w = PAD + 2.0 * r + PAD;
+        let plate_h = PAD + 2.0 * r + GAP + compass_h + PAD;
+        let plate = Rectangle::new(
+            sw - MARGIN - plate_w,
+            sh - MARGIN - plate_h,
+            plate_w,
+            plate_h,
+        );
+        hud::draw_plate(renderer, plate);
+
+        let ai_center = plate.pos + vec2(PAD + r, PAD + r);
+        hud::draw_attitude_indicator(
+            renderer,
+            ai_center,
+            r,
+            self.plane.pitch(),
+            self.plane.roll(),
+        );
+
+        let compass = Rectangle::new(
+            plate.pos.x + PAD,
+            plate.pos.y + PAD + 2.0 * r + GAP,
+            2.0 * r,
+            compass_h,
+        );
+        hud::draw_compass(renderer, compass, self.plane.heading().to_degrees());
+    }
+
+    /// Draw altitude, speed and throttle
+    fn draw_engine_panel(&self, renderer: &RenderContext, sh: f32) {
+        let row_h = 26.0;
+        let readout_w = 84.0;
+        let bar_w = 12.0;
+        let rows = 3.0;
+
+        let inner_h = rows * row_h + (rows - 1.0) * GAP;
+        let plate_w = PAD + readout_w + GAP + bar_w + PAD;
+        let plate_h = PAD + inner_h + PAD;
+        let plate = Rectangle::new(MARGIN, sh - MARGIN - plate_h, plate_w, plate_h);
+        hud::draw_plate(renderer, plate);
+
+        let row = |i: f32| {
+            Rectangle::new(
+                plate.pos.x + PAD,
+                plate.pos.y + PAD + i * (row_h + GAP),
+                readout_w,
+                row_h,
+            )
+        };
+        hud::draw_readout(
+            renderer,
+            row(0.0),
+            "ALT",
+            &format!("{:.0} m", self.plane.pos.y),
+        );
+        hud::draw_readout(
+            renderer,
+            row(1.0),
+            "SPD",
+            &format!("{:.0} m/s", self.plane.vel.norm()),
+        );
+        hud::draw_readout(
+            renderer,
+            row(2.0),
+            "THR",
+            &format!("{:.0}%", self.controls.throttle * 100.0),
+        );
+
+        let bar = Rectangle::new(
+            plate.pos.x + PAD + readout_w + GAP,
+            plate.pos.y + PAD,
+            bar_w,
+            inner_h,
+        );
+        hud::draw_vertical_bar(renderer, bar, self.controls.throttle);
     }
 }
 
@@ -139,11 +237,11 @@ impl Scene for FlightSim {
 
         renderer.draw_mesh(self.plane_mesh, plane_model, vec4(0.9, 0.9, 0.9, 1.0));
 
-        let alt = self.plane.pos.y;
-        let spd = self.plane.vel.norm();
+        self.draw_hud(app);
+
         renderer.draw_text(
             vec2(10.0, 10.0),
-            &format!("{} FPS\nHeight: {alt:.0} m\nSpeed: {spd:.0} m/s", app.fps),
+            &format!("{} FPS", app.fps),
             vec4(0.1, 0.1, 0.1, 1.0),
         );
     }

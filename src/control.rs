@@ -57,6 +57,32 @@ impl Controls {
         self.roll += (self.target_roll - self.roll) * smoothing.min(1.0);
         self.yaw += (self.target_yaw - self.yaw) * smoothing.min(1.0);
 
-        // TODO: joystick!
+        if let Some(js) = input.joystick() {
+            let axes: Vec<String> = (0..js.num_axes())
+                .map(|i| format!("{:+.2}", js.axis(i)))
+                .collect();
+            println!("{}: [{}]", js.name, axes.join(", "));
+        }
+
+        if let Some(js) = input.joystick() {
+            let stick_roll = deadzone(js.axis(0), 0.17);
+            let stick_pitch = deadzone(js.axis(1), 0.07);
+            let stick_yaw = deadzone(js.axis(2) * 2.0 + 1.0, 0.05);
+
+            // Add on the stick input
+            self.pitch = stick_pitch;
+            self.roll = stick_roll;
+            self.yaw = stick_yaw;
+            self.throttle = (1.0 - js.axis(3)) * 0.5;
+        }
+    }
+}
+
+/// Zero out small stick noise near center, then rescale so it still reaches +-1
+fn deadzone(value: f32, size: f32) -> f32 {
+    if value.abs() < size {
+        0.0
+    } else {
+        value.signum() * (value.abs() - size) / (1.0 - size)
     }
 }
