@@ -242,6 +242,28 @@ impl Airplane {
 
         translation * rotation
     }
+
+    /// Nose angle above the horizon [rad], + = nose up
+    pub fn pitch(&self) -> f32 {
+        let forward = nalgebra_glm::quat_rotate_vec3(&self.orientation, &vec3(1.0, 0.0, 0.0));
+        forward.y.clamp(-1.0, 1.0).asin()
+    }
+
+    /// Bank angle [rad], + = right wing down. Works inverted too
+    pub fn roll(&self) -> f32 {
+        let up = nalgebra_glm::quat_rotate_vec3(&self.orientation, &vec3(0.0, 1.0, 0.0));
+        let right = nalgebra_glm::quat_rotate_vec3(&self.orientation, &vec3(0.0, 0.0, 1.0));
+        (-right.y).atan2(up.y)
+    }
+
+    /// Compass heading [rad], 0 = north (-Z), clockwise, 0..2pi
+    pub fn heading(&self) -> f32 {
+        let forward = nalgebra_glm::quat_rotate_vec3(&self.orientation, &vec3(1.0, 0.0, 0.0));
+        forward
+            .x
+            .atan2(-forward.z)
+            .rem_euclid(std::f32::consts::TAU)
+    }
 }
 
 #[cfg(test)]
