@@ -1,5 +1,6 @@
 use apricot::{
     app::{run, App, AppConfig, Scene},
+    audio::SynthStream,
     camera::{Camera, ProjectionKind},
     error::Error,
     height_grid::HeightGrid,
@@ -16,13 +17,16 @@ use crate::{
     airplane::Airplane,
     config::AirplaneConfig,
     control::Controls,
+    engine_sound::EngineSound,
     hud::{GAP, MARGIN, PAD},
 };
 
 mod airplane;
 mod config;
 mod control;
+mod engine_sound;
 mod hud;
+mod plane_model;
 
 const CELLS: u32 = 500;
 const HEIGHT: f32 = 40.0;
@@ -32,6 +36,7 @@ const SEA_LEVEL: f32 = 0.12;
 // - [x] good aero model
 // - [x] joystick
 // - [ ] better plane model
+//     - [ ] hat to move view (or arrow keys)
 // - [ ] better worldgen model (like 100km, real maps, hawaii, denver)
 // - [ ] weather, wind, time of day
 // - [ ] ground collision
@@ -40,6 +45,7 @@ const SEA_LEVEL: f32 = 0.12;
 //     - [ ] probably requires RK4 for wheel springs
 //     - [ ] ground effect
 // - [ ] different planes (172, pa-28, cub, otter, 737)
+//      - [ ] do actual engine/prop models, move rpm calc from front-end to engine backend
 // - [ ] wet mass, cargo mass
 // - [ ] waypoints, IFR, ATC call outs? flight plans?
 // - [ ] contracts (cargo, passengers, sightseeing, firefighting, bush rescue, skydiving, banner dragging)
@@ -60,6 +66,14 @@ struct FlightSim {
     texture: TextureId,
 
     plane_mesh: MeshId,
+    plane_trim_mesh: MeshId,
+    plane_prop_mesh: MeshId,
+    prop_angle: f32, // [rad]
+    prop_rps: f32,   // displayed revolutions per second
+
+    engine_rpm: f32,
+    engine_sound: Option<SynthStream<EngineSound>>,
+
     plane: Airplane,
     controls: Controls,
 }
@@ -73,11 +87,18 @@ impl FlightSim {
         app.renderer.set_light(Some(&light));
 
         let grid = island();
+        let plane_model = plane_model::airplane_model();
         Self {
             light,
             mesh: renderer.add_mesh_data(terrain_mesh(&grid), None),
             texture: renderer.create_texture_rgba(CELLS, CELLS, &terrain_colors(&grid)),
-            plane_mesh: app.renderer.builtins.cube,
+            plane_mesh: renderer.add_mesh_data(plane_model.body, None),
+            plane_trim_mesh: renderer.add_mesh_data(plane_model.trim, None),
+            plane_prop_mesh: renderer.add_mesh_data(plane_model.prop, None),
+            prop_angle: 0.0,
+            prop_rps: 0.0,
+            engine_rpm: 700.0,
+            engine_sound: app.audio.start_synth(EngineSound::new()),
             plane: Airplane::new(AirplaneConfig::cessna172()),
             controls: Controls::new(),
         }
@@ -184,6 +205,32 @@ impl Scene for FlightSim {
         self.controls.update_input(&app.input, app.dt.as_secs_f32());
         self.plane.update(&self.controls, app.dt.as_secs_f32());
 
+        let dt = app.dt.as_secs_f32();
+        // For fixed speed props
+        // TODO: Configurable?!
+        let target_rpm =
+            (700.0 + self.controls.throttle * 1600.0 + self.plane.vel.norm() * 6.0).min(2800.0);
+        self.engine_rpm += (target_rpm - self.engine_rpm) * (1.5 * dt).min(1.0);
+
+        let (rpm, throttle, airspeed) = (
+            self.engine_rpm,
+            self.controls.throttle,
+            self.plane.vel.norm(),
+        );
+        if let Some(sound) = &mut self.engine_sound {
+            sound.with(|e| {
+                e.rpm = rpm;
+                e.throttle = throttle;
+                e.airspeed = airspeed;
+            });
+        }
+
+        // Engine spools up and down rather than snapping
+        // TODO: Take this from the engine model, don't do this on the front end!
+        self.prop_rps = self.engine_rpm / 2700.0 * 7.5;
+        self.prop_angle =
+            (self.prop_angle + self.prop_rps * std::f32::consts::TAU * dt) % std::f32::consts::TAU;
+
         let forward = nalgebra_glm::quat_rotate_vec3(&self.plane.orientation, &vec3(1.0, 0.0, 0.0));
         let up = nalgebra_glm::quat_rotate_vec3(&self.plane.orientation, &vec3(0.0, 1.0, 0.0));
 
@@ -200,11 +247,11 @@ impl Scene for FlightSim {
         let chase_dir = forward * 0.8 + vel_dir * 0.2;
 
         // Position camera behind and slightly above the blended vector
-        let cam_pos = self.plane.pos - chase_dir * 12.0 + up * 4.0;
+        let cam_pos = self.plane.pos - chase_dir * 25.0 + up * 6.0;
 
         let camera = Camera::new(
             cam_pos,
-            self.plane.pos + forward * 5.0, // Look ahead of the plane
+            self.plane.pos + forward * 10.0, // Look ahead of the plane
             up,
             ProjectionKind::default(),
         );
@@ -225,8 +272,15 @@ impl Scene for FlightSim {
         );
         let plane_model = self.plane.model_matrix();
 
+        let prop_model = nalgebra_glm::rotate_x(
+            &nalgebra_glm::translate(&plane_model, &plane_model::PROP_HUB),
+            self.prop_angle,
+        );
+
         renderer.shadow_pass(&mut self.light, |pass| {
             pass.draw(self.plane_mesh, plane_model);
+            pass.draw(self.plane_trim_mesh, plane_model);
+            pass.draw(self.plane_prop_mesh, prop_model);
             pass.draw(self.mesh, terrain)
         });
 
@@ -236,6 +290,12 @@ impl Scene for FlightSim {
         renderer.draw_mesh(renderer.builtins.plane, sea, vec4(0.15, 0.4, 0.75, 0.7));
 
         renderer.draw_mesh(self.plane_mesh, plane_model, vec4(0.9, 0.9, 0.9, 1.0));
+        renderer.draw_mesh(
+            self.plane_trim_mesh,
+            plane_model,
+            vec4(0.2, 0.22, 0.25, 1.0),
+        );
+        renderer.draw_mesh(self.plane_prop_mesh, prop_model, vec4(0.2, 0.22, 0.25, 1.0));
 
         self.draw_hud(app);
 
