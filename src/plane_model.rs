@@ -3,7 +3,7 @@
 //! Body axes match the physics: +X forward, +Y up, +Z right. Dimensions below are
 //! roughly real C172 meters, with the origin near the center of gravity.
 
-use apricot::mesh_data::MeshData;
+use apricot::mesh::MeshData;
 use nalgebra_glm::{vec3, Vec3};
 
 /// Where the propeller hub sits, in body space [m]

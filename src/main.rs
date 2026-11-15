@@ -1,23 +1,23 @@
 use apricot::{
-    app::{run, App, AppConfig, Scene},
+    app::{run, App, AppConfig, Scene, SceneCommand},
     audio::SynthStream,
     camera::{Camera, ProjectionKind},
     error::Error,
-    height_grid::HeightGrid,
+    geometry::rectangle::Rectangle,
     input::Scancode,
-    mesh_data::MeshData,
-    rectangle::Rectangle,
-    render_core::{MeshId, RenderContext, TextureId},
+    model_set::{Model, ModelSet},
+    render_core::{MeshId, RenderContext},
     shadow_map::DirectionalLight,
+    terrain::chunks::{ChunkCoord, ChunkGrid},
 };
-use nalgebra_glm::{vec2, vec3, vec4, Mat4, Vec2};
-use rand::{rngs::StdRng, RngCore, SeedableRng};
+use nalgebra_glm::{vec2, vec3, vec4, Mat4};
 
 use crate::{
     airplane::Airplane,
     config::AirplaneConfig,
     control::Controls,
     engine_sound::EngineSound,
+    heightmap::Heightmap,
     hud::{GAP, MARGIN, PAD},
 };
 
@@ -25,12 +25,15 @@ mod airplane;
 mod config;
 mod control;
 mod engine_sound;
+mod heightmap;
 mod hud;
 mod plane_model;
+mod terrain_color;
 
-const CELLS: u32 = 500;
-const HEIGHT: f32 = 40.0;
-const SEA_LEVEL: f32 = 0.12;
+const CAMERA_FAR: f32 = 50_000.0;
+const CHUNK_CELLS: u32 = 64; // 64 × 30 m ≈ 2 km per chunk
+const LOAD_RADIUS: i32 = 25; // chunks
+const LOADS_PER_FRAME: usize = 2;
 
 // todo:
 // - [x] good aero model
@@ -38,13 +41,15 @@ const SEA_LEVEL: f32 = 0.12;
 // - [x] better plane model
 //     - [x] hat to move view (or arrow keys)
 // - [ ] better worldgen model (like 100km, real maps, hawaii, denver)
+//     - [ ] mini map
 // - [ ] weather, wind, time of day
 // - [ ] ground collision
 // - [ ] flaps, gear, slats, aerobrakes, whatever
+//     - [ ] stall horn for the cessna
 // - [ ] landing, airports
 //     - [ ] probably requires RK4 for wheel springs
 //     - [ ] ground effect
-// - [ ] different planes (172, pa-28, cub, otter, 737)
+// - [ ] different planes (172, pa-28, cub, otter, citation, 737-200)
 //      - [ ] do actual engine/prop models, move rpm calc from front-end to engine backend
 // - [ ] wet mass, cargo mass
 // - [ ] waypoints, IFR, ATC call outs? flight plans?
@@ -62,8 +67,10 @@ fn main() -> Result<(), Error> {
 
 struct FlightSim {
     light: DirectionalLight,
-    mesh: MeshId,
-    texture: TextureId,
+
+    map: Heightmap,
+    chunk_grid: ChunkGrid,
+    chunks: ModelSet<ChunkCoord>,
 
     plane_mesh: MeshId,
     plane_trim_mesh: MeshId,
@@ -86,12 +93,9 @@ impl FlightSim {
         light.shadow_distance = 150.0;
         app.renderer.set_light(Some(&light));
 
-        let grid = island();
         let plane_model = plane_model::airplane_model();
-        Self {
+        let mut sim = Self {
             light,
-            mesh: renderer.add_mesh_data(terrain_mesh(&grid), None),
-            texture: renderer.create_texture_rgba(CELLS, CELLS, &terrain_colors(&grid)),
             plane_mesh: renderer.add_mesh_data(plane_model.body, None),
             plane_trim_mesh: renderer.add_mesh_data(plane_model.trim, None),
             plane_prop_mesh: renderer.add_mesh_data(plane_model.prop, None),
@@ -101,7 +105,14 @@ impl FlightSim {
             engine_sound: app.audio.start_synth(EngineSound::new()),
             plane: Airplane::new(AirplaneConfig::cessna172()),
             controls: Controls::new(),
-        }
+            map: Heightmap::load_geotiff("assets/denver.tif").expect("couldn't load heightmap"),
+            chunk_grid: ChunkGrid::new(CHUNK_CELLS),
+            chunks: ModelSet::new(),
+        };
+        sim.update_chunks(&app.renderer, usize::MAX); // load everything in range now
+        let (w, d) = sim.map.size();
+        sim.plane.pos = vec3(w as f32 * 0.5 * 30.0, 1700.0, d as f32 * 0.5 * 30.0);
+        sim
     }
 
     fn draw_hud(&self, app: &App) {
@@ -194,16 +205,74 @@ impl FlightSim {
         );
         hud::draw_vertical_bar(renderer, bar, self.controls.throttle);
     }
+
+    fn update_chunks(&mut self, renderer: &RenderContext, max_loads: usize) {
+        let (sx, sz) = (self.map.spacing_x, self.map.spacing_z);
+        let cell_pos = vec3(self.plane.pos.x / sx, 0.0, self.plane.pos.z / sz);
+
+        let (w, d) = self.map.size();
+        let max_cx = (w as u32).div_ceil(CHUNK_CELLS) as i32;
+        let max_cz = (d as u32).div_ceil(CHUNK_CELLS) as i32;
+
+        // Closest first, and only chunks that are actually on the map
+        let wanted: Vec<ChunkCoord> = self
+            .chunk_grid
+            .chunks_near(cell_pos, LOAD_RADIUS)
+            .into_iter()
+            .filter(|&(cx, cz)| cx >= 0 && cz >= 0 && cx < max_cx && cz < max_cz)
+            .collect();
+
+        // Unload anything that's dropped out of range
+        let stale: Vec<ChunkCoord> = self
+            .chunks
+            .iter()
+            .map(|(k, _)| k)
+            .filter(|k| !wanted.contains(k))
+            .collect();
+        for k in stale {
+            if let Some(model) = self.chunks.remove(k) {
+                renderer.unload_mesh(model.mesh);
+            }
+        }
+
+        let missing: Vec<ChunkCoord> = wanted
+            .into_iter()
+            .filter(|&c| self.chunks.get(c).is_none())
+            .take(max_loads)
+            .collect();
+
+        // Build a few missing chunks per frame, so flying fast doesn't cause a hitch
+        let map = &self.map; // borrow just the map, so the closure doesn't borrow all of self
+        for chunk in missing {
+            let mesh = self
+                .chunk_grid
+                .mesh(chunk, |x, z| map.sample(x as i32, z as i32));
+            let mesh_id = renderer.add_mesh_data(mesh, None);
+
+            let o = self.chunk_grid.origin(chunk);
+            let origin = vec3(o.x * sx, 0.0, o.z * sz);
+            let transform =
+                nalgebra_glm::scale(&nalgebra_glm::translation(&origin), &vec3(sx, 1.0, sz));
+
+            let pixels = terrain_color::chunk_texture(map, &self.chunk_grid, chunk);
+            let texture = renderer.create_texture_rgba(CHUNK_CELLS, CHUNK_CELLS, &pixels);
+
+            self.chunks
+                .insert(renderer, chunk, Model::new(mesh_id, texture, transform));
+        }
+    }
 }
 
 impl Scene for FlightSim {
-    fn update(&mut self, app: &App) {
+    fn update(&mut self, app: &App) -> SceneCommand {
         if app.input.key_pressed(Scancode::Tab) {
             app.set_cursor_captured(!app.cursor_captured());
         }
 
         self.controls.update_input(&app.input, app.dt.as_secs_f32());
         self.plane.update(&self.controls, app.dt.as_secs_f32());
+
+        self.update_chunks(&app.renderer, LOADS_PER_FRAME);
 
         let dt = app.dt.as_secs_f32();
         // For fixed speed props
@@ -232,7 +301,6 @@ impl Scene for FlightSim {
             (self.prop_angle + self.prop_rps * std::f32::consts::TAU * dt) % std::f32::consts::TAU;
 
         let forward = nalgebra_glm::quat_rotate_vec3(&self.plane.orientation, &vec3(1.0, 0.0, 0.0));
-        let right = nalgebra_glm::quat_rotate_vec3(&self.plane.orientation, &vec3(0.0, 0.0, 1.0));
         let up = nalgebra_glm::quat_rotate_vec3(&self.plane.orientation, &vec3(0.0, 1.0, 0.0));
 
         // Extract normalized velocity direction to feel sideways/vertical drift (AoA/sideslip)
@@ -257,22 +325,23 @@ impl Scene for FlightSim {
             cam_pos,
             self.plane.pos + view_dir * 10.0, // Look ahead of the plane
             up,
-            ProjectionKind::default(),
+            ProjectionKind::Perspective {
+                fov_rad: std::f32::consts::FRAC_PI_4,
+                near: 1.0,
+                far: CAMERA_FAR,
+            },
         );
 
         app.renderer.set_camera(camera);
+        SceneCommand::None
     }
 
     fn render(&mut self, app: &App) {
         let renderer = &app.renderer;
-        let half = CELLS as f32 / 2.0;
-        let terrain = nalgebra_glm::scale(
-            &nalgebra_glm::translation(&vec3(-half, 0.0, -half)),
-            &vec3(10.0, 5.0, 10.0),
-        );
+        let sea_size = 2.0 * CAMERA_FAR;
         let sea: Mat4 = nalgebra_glm::scale(
-            &nalgebra_glm::translation(&vec3(0.0, SEA_LEVEL * HEIGHT, 0.0)),
-            &vec3(CELLS as f32 * 3.0, 1.0, CELLS as f32 * 3.0),
+            &nalgebra_glm::translation(&vec3(self.plane.pos.x, 0.0, self.plane.pos.z)),
+            &vec3(sea_size, 1.0, sea_size),
         );
         let plane_model = self.plane.model_matrix();
 
@@ -285,11 +354,11 @@ impl Scene for FlightSim {
             pass.draw(self.plane_mesh, plane_model);
             pass.draw(self.plane_trim_mesh, plane_model);
             pass.draw(self.plane_prop_mesh, prop_model);
-            pass.draw(self.mesh, terrain)
+            self.chunks.draw_shadows(pass);
         });
 
         renderer.clear(vec4(0.6, 0.8, 0.95, 1.0));
-        renderer.draw_mesh_textured(self.mesh, self.texture, terrain, vec4(1.0, 1.0, 1.0, 1.0));
+        self.chunks.draw(renderer);
         // See-through, so drawn after the land
         renderer.draw_mesh(renderer.builtins.plane, sea, vec4(0.15, 0.4, 0.75, 0.7));
 
@@ -309,61 +378,4 @@ impl Scene for FlightSim {
             vec4(0.1, 0.1, 0.1, 1.0),
         );
     }
-}
-
-/// Noise that fades into the sea toward the edges, stretched to fill 0 to 1
-fn island() -> HeightGrid {
-    let width = CELLS as usize + 1;
-    let mut rng = StdRng::from_entropy();
-    let mut grid =
-        HeightGrid::from_noise(width, 0.02, 6, rng.next_u32() as i32, 1.0, vec2(0.0, 0.0));
-    grid.normalize();
-
-    let center = CELLS as f32 / 2.0;
-    for z in 0..width {
-        for x in 0..width {
-            let p = vec2(x as f32, z as f32);
-            let d = nalgebra_glm::distance(&p, &vec2(center, center)) / center;
-            let falloff = 1.0 - smoothstep(0.15, 1.0, d);
-            grid.set_height(p, grid.height(p) * falloff);
-        }
-    }
-    grid.normalize();
-    grid
-}
-
-fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
-    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
-
-fn terrain_mesh(grid: &HeightGrid) -> MeshData {
-    MeshData::heightmap(CELLS, CELLS, |x, z| grid.height(vec2(x, z)) * HEIGHT)
-}
-
-/// One color per cell by height, turning blue where lots of water has run
-fn terrain_colors(grid: &HeightGrid) -> Vec<u8> {
-    let cells: Vec<Vec2> = (0..CELLS * CELLS)
-        .map(|i| vec2((i % CELLS) as f32, (i / CELLS) as f32))
-        .collect();
-    // Flow piles up fast along rivers, so compare it on a log scale
-    let max_flow = cells.iter().map(|p| grid.flow(*p)).fold(0.0, f32::max);
-    let river_scale = (1.0 + max_flow).ln().max(1e-6);
-
-    cells
-        .iter()
-        .flat_map(|p| {
-            let h = grid.height(*p);
-            let land = match h {
-                h if h < SEA_LEVEL + 0.03 => [220.0, 205.0, 150.0],
-                h if h < 0.45 => [90.0, 160.0, 70.0],
-                h if h < 0.7 => [120.0, 115.0, 110.0],
-                _ => [240.0, 240.0, 245.0],
-            };
-            let river = smoothstep(0.4, 0.8, (1.0 + grid.flow(*p)).ln() / river_scale);
-            let water = [50.0, 110.0, 200.0];
-            let mix = |i: usize| (land[i] + (water[i] - land[i]) * river) as u8;
-            [mix(0), mix(1), mix(2), 255]
-        })
-        .collect()
 }
