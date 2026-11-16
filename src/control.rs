@@ -37,6 +37,14 @@ impl Controls {
         self.target_yaw = 0.0;
         self.target_pan = 0.0;
 
+        if input.key_down(sdl2::keyboard::Scancode::LShift) {
+            self.throttle += 0.01;
+        }
+        if input.key_down(sdl2::keyboard::Scancode::LCtrl) {
+            self.throttle -= 0.01;
+        }
+        self.throttle = self.throttle.clamp(0.0, 1.0);
+
         if input.key_down(sdl2::keyboard::Scancode::W) {
             self.target_pitch -= 1.0;
         }
@@ -77,9 +85,9 @@ impl Controls {
         }
 
         if let Some(js) = input.joystick() {
-            let stick_roll = deadzone(js.axis(0), 0.2);
-            let stick_pitch = deadzone(js.axis(1), 0.2);
-            let stick_yaw = deadzone(js.axis(2) * 2.0 + 1.0, 0.2);
+            let stick_roll = deadzone(js.axis(0), 0.1);
+            let stick_pitch = deadzone(js.axis(1), 0.1);
+            let stick_yaw = deadzone(js.axis(2), 0.1);
 
             // Add on the stick input
             self.pitch = stick_pitch;

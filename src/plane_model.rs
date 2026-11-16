@@ -3,8 +3,8 @@
 //! Body axes match the physics: +X forward, +Y up, +Z right. Dimensions below are
 //! roughly real C172 meters, with the origin near the center of gravity.
 
-use apricot::mesh::MeshData;
-use nalgebra_glm::{vec3, Vec3};
+use apricot::mesh::{MeshData, Vertex};
+use nalgebra_glm::{vec2, vec3, Vec3};
 
 /// Where the propeller hub sits, in body space [m]
 pub const PROP_HUB: Vec3 = Vec3::new(2.42, -0.02, 0.0);
@@ -170,11 +170,9 @@ impl Builder {
         }
         let n = n.normalize();
 
-        let base = (self.data.positions.len() / 3) as u32;
+        let base = self.data.vertex_count() as u32;
         for p in &pts {
-            self.data.positions.extend_from_slice(&[p.x, p.y, p.z]);
-            self.data.normals.extend_from_slice(&[n.x, n.y, n.z]);
-            self.data.uvs.extend_from_slice(&[0.0, 0.0, 0.0]);
+            self.data.vertices.push(Vertex::new(*p, n, vec2(0.0, 0.0)));
         }
         // Triangle fan
         for i in 1..pts.len() as u32 - 1 {

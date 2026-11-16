@@ -1,6 +1,6 @@
 //! Flight instruments
 
-use apricot::{geometry::rectangle::Rectangle, render_core::RenderContext};
+use apricot::{geometry::rectangle::Rectangle, render::RenderContext};
 use nalgebra_glm::{vec2, Vec2, Vec4};
 
 // Layout
