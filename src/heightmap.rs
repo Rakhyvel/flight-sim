@@ -22,6 +22,7 @@ pub struct Heightmap {
 impl Heightmap {
     /// Load elevation (in meters) from a GeoTIFF DEM
     pub fn load_geotiff(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        const SCALE: f64 = 1.0;
         let mut decoder =
             Decoder::new(BufReader::new(File::open(path)?))?.with_limits(Limits::unlimited());
         let (width, depth) = decoder.dimensions()?;
@@ -46,7 +47,7 @@ impl Heightmap {
             .into_iter()
             .map(|h| {
                 if h.is_finite() && h > 0.0 {
-                    h
+                    h * SCALE as f32
                 } else {
                     SEA_FLOOR
                 }
@@ -57,7 +58,7 @@ impl Heightmap {
 
         let (spacing_x, spacing_z) = if pixel_scale[0] < 1.0 {
             // Tiny pixel size means degrees (lat/lon). Convert using the map's middle latitude
-            const METERS_PER_DEGREE: f64 = 111_320.0;
+            const METERS_PER_DEGREE: f64 = 111_320.0 * SCALE;
             let top_lat = tiepoint[4];
             let mid_lat = (top_lat - pixel_scale[1] * depth as f64 / 2.0).to_radians();
             (

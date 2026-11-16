@@ -67,6 +67,7 @@ impl EngineSound {
 }
 
 impl Synth for EngineSound {
+    /// This gets called at 44khz so keep it TIGHT!
     fn next_sample(&mut self, dt: f32) -> f32 {
         // Smoothly glide to whatever the rpm is
         // TODO: This should probably come from the actual engine models, not something done at the front end

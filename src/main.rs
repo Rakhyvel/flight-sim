@@ -1,13 +1,14 @@
 use apricot::{
     app::{run, App, AppConfig, Scene, SceneCommand},
     audio::SynthStream,
-    camera::{Camera, ProjectionKind},
+    camera::{Camera, ProjectionKind, ViewProj},
     error::Error,
     geometry::rectangle::Rectangle,
     input::Scancode,
     model_set::{Model, ModelSet},
-    render_core::{MeshId, RenderContext},
-    shadow_map::DirectionalLight,
+    render::assets::{MeshId, ProgramId},
+    render::lighting::DirectionalLight,
+    render::RenderContext,
     terrain::chunks::{ChunkCoord, ChunkGrid},
 };
 use nalgebra_glm::{vec2, vec3, vec4, Mat4};
@@ -32,28 +33,42 @@ mod terrain_color;
 
 const CAMERA_FAR: f32 = 50_000.0;
 const CHUNK_CELLS: u32 = 64; // 64 × 30 m ≈ 2 km per chunk
-const LOAD_RADIUS: i32 = 25; // chunks
+const LOAD_RADIUS: i32 = 10; // chunks
 const LOADS_PER_FRAME: usize = 2;
 
 // todo:
 // - [x] good aero model
 // - [x] joystick
 // - [x] better plane model
-//     - [x] hat to move view (or arrow keys)
+//     - [ ] hat to move view (or arrow keys) to orbit
 // - [ ] better worldgen model (like 100km, real maps, hawaii, denver)
 //     - [ ] mini map
 // - [ ] weather, wind, time of day
+//     - [ ] distance haze, fog
+//     - [ ] Higher LOD shadow maps for the airplane, maybe cascading shadow maps
+//     - [ ] atmospheric effects (golden hour, overcast skies, sunrise, sunset)
+//     - [ ] rain, wind, upwelling from mountains, actual raindrops when raining?
+//     - [ ] volumetric clouds that move with the wind and exist where they would exist
+//     - [ ] water should look like water (reflection, refraction, waves, etc)
+//     - [ ] terrain textures, not just a solid color (sat imagery?)
+//     - [ ] vegetation scatter, building scatter
+//     - [ ] prop blur
+//     - [ ] control surface deflection? wing flex?
+// - [ ] camera jitter and g-force lag
 // - [ ] ground collision
 // - [ ] flaps, gear, slats, aerobrakes, whatever
 //     - [ ] stall horn for the cessna
+//     - [ ] g limits
 // - [ ] landing, airports
 //     - [ ] probably requires RK4 for wheel springs
 //     - [ ] ground effect
+//     - [ ] gotta make sure the camera doesn't clip into the ground
 // - [ ] different planes (172, pa-28, cub, otter, citation, 737-200)
 //      - [ ] do actual engine/prop models, move rpm calc from front-end to engine backend
 // - [ ] wet mass, cargo mass
 // - [ ] waypoints, IFR, ATC call outs? flight plans?
 // - [ ] contracts (cargo, passengers, sightseeing, firefighting, bush rescue, skydiving, banner dragging)
+// - [ ] cockpit camera? idrc about this ngl
 
 fn main() -> Result<(), Error> {
     run(
@@ -72,6 +87,8 @@ struct FlightSim {
     chunk_grid: ChunkGrid,
     chunks: ModelSet<ChunkCoord>,
 
+    sky_program: ProgramId,
+
     plane_mesh: MeshId,
     plane_trim_mesh: MeshId,
     plane_prop_mesh: MeshId,
@@ -86,11 +103,24 @@ struct FlightSim {
 }
 
 impl FlightSim {
-    fn new(app: &App) -> Self {
+    fn new(app: &App) -> Result<Self, Error> {
         let renderer = &app.renderer;
 
-        let mut light = DirectionalLight::new(vec3(0.6, 10.0, 0.3), 2048).unwrap();
-        light.shadow_distance = 150.0;
+        // Replace the default 3d shader with our super cool epic shader
+        renderer.add_program_from_source(
+            include_str!("shaders/3d.vert"),
+            include_str!("shaders/3d.frag"),
+            Some("3d"),
+        )?;
+
+        let sky_program = renderer.add_program_from_source(
+            include_str!("shaders/sky.vert"),
+            include_str!("shaders/sky.frag"),
+            Some("sky"),
+        )?;
+
+        let mut light = DirectionalLight::new(vec3(0.6, 0.8, 0.3), 2048)?;
+        light.frustum.shadow_distance = 150.0;
         app.renderer.set_light(Some(&light));
 
         let plane_model = plane_model::airplane_model();
@@ -99,20 +129,21 @@ impl FlightSim {
             plane_mesh: renderer.add_mesh_data(plane_model.body, None),
             plane_trim_mesh: renderer.add_mesh_data(plane_model.trim, None),
             plane_prop_mesh: renderer.add_mesh_data(plane_model.prop, None),
+            sky_program,
             prop_angle: 0.0,
             prop_rps: 0.0,
             engine_rpm: 700.0,
             engine_sound: app.audio.start_synth(EngineSound::new()),
-            plane: Airplane::new(AirplaneConfig::cessna172()),
+            plane: Airplane::new(AirplaneConfig::dash_8()),
             controls: Controls::new(),
-            map: Heightmap::load_geotiff("assets/denver.tif").expect("couldn't load heightmap"),
+            map: Heightmap::load_geotiff("assets/maui.tif").expect("couldn't load heightmap"),
             chunk_grid: ChunkGrid::new(CHUNK_CELLS),
             chunks: ModelSet::new(),
         };
         sim.update_chunks(&app.renderer, usize::MAX); // load everything in range now
         let (w, d) = sim.map.size();
-        sim.plane.pos = vec3(w as f32 * 0.5 * 30.0, 1700.0, d as f32 * 0.5 * 30.0);
-        sim
+        sim.plane.pos = vec3(w as f32 * 0.5, 1700.0, d as f32 * 0.5);
+        Ok(sim)
     }
 
     fn draw_hud(&self, app: &App) {
@@ -219,7 +250,7 @@ impl FlightSim {
             .chunk_grid
             .chunks_near(cell_pos, LOAD_RADIUS)
             .into_iter()
-            .filter(|&(cx, cz)| cx >= 0 && cz >= 0 && cx < max_cx && cz < max_cz)
+            .filter(|c| c.x >= 0 && c.z >= 0 && c.x < max_cx && c.z < max_cz)
             .collect();
 
         // Unload anything that's dropped out of range
@@ -349,6 +380,12 @@ impl Scene for FlightSim {
             &nalgebra_glm::translate(&plane_model, &plane_model::PROP_HUB),
             self.prop_angle,
         );
+
+        let p = renderer.builtins.program_3d;
+        renderer
+            .uniform(p, "u_fog_color")
+            .set_vec3(&vec3(0.70, 0.80, 0.90));
+        renderer.uniform(p, "u_fog_density").set_f32(0.0003);
 
         renderer.shadow_pass(&mut self.light, |pass| {
             pass.draw(self.plane_mesh, plane_model);
