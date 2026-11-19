@@ -1,3 +1,5 @@
+use apricot::terrain::{surface_height, surface_normal};
+use nalgebra_glm::{vec3, Vec3};
 use std::{fs::File, io::BufReader};
 use tiff::{
     decoder::{Decoder, DecodingResult, Limits},
@@ -92,5 +94,22 @@ impl Heightmap {
     /// Size in samples
     pub fn size(&self) -> (usize, usize) {
         (self.width, self.depth)
+    }
+
+    /// Smooth ground height at (x, z)
+    pub fn ground(&self, x: f32, z: f32) -> (f32, Vec3) {
+        let height = |cx: f32, cz: f32| self.sample(cx as i32, cz as i32);
+        let (cx, cz) = (x / self.spacing_x, z / self.spacing_z);
+        let h = surface_height(height, cx, cz);
+        if h <= 0.0 {
+            return (0.0, Vec3::y());
+        }
+
+        let n = surface_normal(height, cx, cz);
+        (
+            h,
+            // Conver the normal's cell units to meters
+            vec3(n.x / self.spacing_x, n.y, n.z / self.spacing_z).normalize(),
+        )
     }
 }

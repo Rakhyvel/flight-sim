@@ -62,7 +62,7 @@ const LOADS_PER_FRAME: usize = 2;
 //     - [ ] prop blur
 //     - [ ] control surface deflection? wing flex?
 // - [ ] camera jitter and g-force lag
-// - [ ] water/ground collision
+// - [x] water/ground collision
 // - [ ] flaps, gear, slats, aerobrakes, whatever
 //     - [ ] stall horn for the cessna
 //     - [ ] g limits
@@ -350,7 +350,10 @@ impl Scene for FlightSim {
         }
 
         self.controls.update_input(&app.input, app.dt.as_secs_f32());
-        self.plane.update(&self.controls, app.dt.as_secs_f32());
+        self.plane
+            .update(&self.controls, app.dt.as_secs_f32(), &|x, z| {
+                self.map.ground(x, z)
+            });
 
         self.update_chunks(&app.renderer, LOADS_PER_FRAME);
 
