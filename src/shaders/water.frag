@@ -16,22 +16,6 @@ float air_distance(float dist) {
     return dist / max(1.0 - edge, 1e-4);
 }
 
-// psuedo-random 0..1 from a 2D point
-float hash(vec2 p) {
-    p = fract(p * vec2(123.34, 456.21));
-    p += dot(p, p + 45.32);
-    return fract(p.x * p.y);
-}
-
-// smooth 0..1 noise, one random value per whole-number grid cell, blended between
-float value_noise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(hash(i), hash(i + vec2(1.0,0.0)), u.x),
-        mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
-}
-
 vec2 wave_slope(vec2 p, float t, out float filtered) {
     float footprint = length(fwidth(p)); // meters per pixel here
 

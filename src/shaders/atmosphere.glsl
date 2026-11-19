@@ -8,7 +8,7 @@ const float H_R = 8000.0; // Rayleigh scale height
 const float H_M = 1200.0; // Mie scale height
 const float MIE_G = 0.76; // How forward-scattering the haze is (the glow around the sun)
 const float SUN_INTENSITY = 20.0;
-const float EXPOSURE = 1.0;
+const float EXPOSURE = 1.7;
 
 // Near and far distances where the ray hits a sphere of radius r at the origin. (-1, -1) on a miss
 vec2 ray_sphere(vec3 ro, vec3 rd, float r) {

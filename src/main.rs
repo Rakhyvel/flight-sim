@@ -121,6 +121,7 @@ impl FlightSim {
             frag!(
                 "shaders/lighting.glsl",
                 "shaders/atmosphere.glsl",
+                "shaders/noise.glsl",
                 "shaders/3d.frag",
             ),
             Some("3d"),
@@ -135,12 +136,13 @@ impl FlightSim {
             frag!(
                 "shaders/atmosphere.glsl",
                 "shaders/lighting.glsl",
+                "shaders/noise.glsl",
                 "shaders/water.frag"
             ),
             Some("water"),
         )?;
 
-        let mut light = DirectionalLight::new(vec3(0.6, 0.5, 0.3).normalize(), 2048)?;
+        let mut light = DirectionalLight::new(vec3(1.0, 0.5, 0.0).normalize(), 2048)?;
         light.frustum.shadow_distance = 150.0;
         app.renderer.set_light(Some(&light));
 
@@ -163,7 +165,7 @@ impl FlightSim {
         };
         sim.update_chunks(&app.renderer, usize::MAX); // load everything in range now
         let (w, d) = sim.map.size();
-        sim.plane.pos = vec3(w as f32 * 0.5, 1700.0, d as f32 * 0.5);
+        sim.plane.pos = vec3(50000.0, 1700.0, 50000.0);
         Ok(sim)
     }
 
@@ -298,7 +300,7 @@ impl FlightSim {
         for chunk in missing {
             let mesh = self
                 .chunk_grid
-                .mesh(chunk, |x, z| map.sample(x as i32, z as i32));
+                .mesh_smooth(chunk, |x, z| map.sample(x as i32, z as i32));
             let mesh_id = renderer.add_mesh_data(mesh, None);
 
             let o = self.chunk_grid.origin(chunk);
@@ -308,6 +310,7 @@ impl FlightSim {
 
             let pixels = terrain_color::chunk_texture(map, &self.chunk_grid, chunk);
             let texture = renderer.create_texture_rgba(CHUNK_CELLS, CHUNK_CELLS, &pixels);
+            renderer.get_texture_from_id(texture).set_smooth(true);
 
             self.chunks
                 .insert(renderer, chunk, Model::new(mesh_id, texture, transform));
@@ -413,8 +416,19 @@ impl Scene for FlightSim {
 
         renderer.clear(vec4(0.6, 0.8, 0.95, 1.0));
         renderer.draw_sky(self.light.direction());
+
+        // Draw the terrain (with noise)
+        renderer
+            .uniform(renderer.builtins.program_3d, "u_detail")
+            .set_f32(1.0);
         self.chunks.draw(renderer);
-        // See-through, so drawn after the land
+
+        // Reset the noise to 0.0 for everything else
+        renderer
+            .uniform(renderer.builtins.program_3d, "u_detail")
+            .set_f32(0.0);
+
+        // Draw the water
         renderer
             .uniform(self.water_program, "u_time")
             .set_f32((app.seconds % 1000.0) as f32);
