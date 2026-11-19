@@ -2,6 +2,7 @@ uniform sampler2D u_texture;
 uniform vec4 u_color;
 uniform vec3 u_sun_dir;
 uniform vec3 u_camera_pos;
+uniform float u_detail; // 1 for noise, 0 for everything else
 
 in vec3 v_normal;
 in vec2 v_uv;
@@ -17,12 +18,29 @@ float air_distance(float dist) {
     return dist / max(1.0 - edge, 1e-4);
 }
 
+float ground_detail(vec2 p) {
+    float footprint = length(fwidth(p));
+    const mat2 TURN = mat2(0.8, 0.6, -0.6, 0.8);
+    float d = 0.0;
+    float amp = 0.5;
+    float freq = 1.0 / 8.0;
+    for (int i = 0; i < 4; i++) {
+        float keep = 1.0 - smoothstep(0.25, 1.0, freq * footprint);
+        d += (value_noise(p * freq) - 0.5) * amp * keep;
+        p = TURN * p + vec2(31.7, -17.3);
+        freq *= 2.3;
+        amp *= 0.5;
+    }
+    return d;
+}
+
 void main() {
     vec3 n = normalize(v_normal);
     vec3 l = normalize(u_sun_dir);
 
     vec4 base = texture(u_texture, v_uv) * u_color;
     vec3 albedo = pow(base.rgb, vec3(2.2)); // convert color to linear
+    albedo *= 1.0 + 0.6 * ground_detail(v_world_pos.xz) * u_detail;
 
     // Direct sun, colored by the atmosphere
     vec3 sun = sun_light(v_world_pos.y, l);
