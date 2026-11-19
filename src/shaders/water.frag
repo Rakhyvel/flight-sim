@@ -54,7 +54,7 @@ vec2 wave_slope(vec2 p, float t, out float filtered) {
 
         lost += steep * (1.0 - keep);
         total += steep;
-        k *= mix(1.6, 1.85, hash(vec2(fi, 4.3))); // uneven steps so octaves don't share a rhythm
+        k *= mix(1.06, 1.85, hash(vec2(fi, 4.3))); // uneven steps so octaves don't share a rhythm
         amp *= 0.58;
     }
     filtered = lost / total;

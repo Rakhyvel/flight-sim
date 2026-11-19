@@ -1,13 +1,63 @@
-//! A simple low-poly high-wing airplane (172/Cub-ish), built from boxes in code
-//!
-//! Body axes match the physics: +X forward, +Y up, +Z right. Dimensions below are
-//! roughly real C172 meters, with the origin near the center of gravity.
-
+///! Defines the plane mesh
+///! TODO: The mesh should be taken from a .obj, and idk about the contact points but probably a toml or something per plane.
+///!       Maybe the toml specifies the .obj, the textures, and the contact points? And the engine config? And the aero config?
 use apricot::mesh::{MeshData, Vertex};
 use nalgebra_glm::{vec2, vec3, Vec3};
 
 /// Where the propeller hub sits, in body space [m]
 pub const PROP_HUB: Vec3 = Vec3::new(2.42, -0.02, 0.0);
+
+/// Something that can collide with the ground
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ContactKind {
+    /// Smoothly roll across the ground
+    Wheel,
+    /// Agressively scrape against the ground
+    Airframe,
+}
+
+/// A sphere on the airplane that collides with the ground, in body space
+#[derive(Clone, Copy)]
+pub struct ContactPoint {
+    /// Center of the sphere [m]
+    pub pos: Vec3,
+    /// Radius of the sphere
+    pub radius: f32,
+    pub kind: ContactKind,
+}
+
+const fn wheel(x: f32, y: f32, z: f32, radius: f32) -> ContactPoint {
+    ContactPoint {
+        pos: Vec3::new(x, y, z),
+        radius,
+        kind: ContactKind::Wheel,
+    }
+}
+
+const fn airframe(x: f32, y: f32, z: f32) -> ContactPoint {
+    ContactPoint {
+        pos: Vec3::new(x, y, z),
+        radius: 0.1,
+        kind: ContactKind::Airframe,
+    }
+}
+
+pub const CONTACTS: [ContactPoint; 10] = [
+    // Gear
+    wheel(-0.5, -1.1, -1.2, 0.25),
+    wheel(-0.5, -1.1, 1.2, 0.25),
+    wheel(1.9, -1.05, 0.0, 0.2),
+    // Wingtips
+    airframe(-0.3, 0.9, -5.5), // left
+    airframe(-0.3, 0.9, 5.5),  // right
+    // Tail
+    airframe(-5.3, 0.0, 0.0),  // bottom of the fuselage
+    airframe(-5.1, 0.2, -1.7), // left stab
+    airframe(-5.1, 0.2, 1.7),  // right stab
+    airframe(-5.3, 1.55, 0.0), // top of fin
+    // Prop tip at its lowest
+    airframe(2.42, -0.97, 0.0),
+];
 
 /// Two meshes so they can be drawn in different colors
 pub struct AirplaneModel {
@@ -64,7 +114,8 @@ pub fn airplane_model() -> AirplaneModel {
         );
     }
 
-    // Landing gear: spring-steel main legs and a nose strut
+    // Landing gear
+    // TODO: Make this read from the contact points?!
     for side in [-1.0, 1.0] {
         body.strut(
             vec3(-0.5, -0.5, side * 0.45),

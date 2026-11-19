@@ -1,6 +1,26 @@
 use nalgebra_glm::{vec3, Mat3, Mat4, Quat, Vec3};
 
-use crate::{config::AirplaneConfig, control::Controls};
+use crate::{
+    config::AirplaneConfig,
+    control::Controls,
+    plane_model::{ContactKind, CONTACTS},
+};
+
+// TODO: These should prob come from config
+/// How far the gear squishes down when the plane is sitting still [m]
+const WHEEL_SAG: f32 = 0.05;
+/// Fraction of critical damping
+const WHEEL_DAMPING: f32 = 0.6;
+/// How much stiffer the airframe is than the tires (?)
+const AIRFRAME_STIFFNESS: f32 = 4.0;
+/// Tire sideways friction coeff
+const TIRE_GRIP: f32 = 0.8;
+/// Tire rolling friciton coeff
+const ROLLING_FRICTION: f32 = 0.02;
+/// Airframe scraping coeff
+const SCRAPE_FRICTION: f32 = 0.5;
+/// Speed to ease off friction [m/s]
+const SLIP_SPEED: f32 = 0.3;
 
 // TODO:
 // - split this off into RigidBodyState {pos, vel, orient, ang vel} and Deriv{vel, accel, ang vel, ang acc}, then define derivative() on Airplane for RK4
@@ -58,23 +78,29 @@ impl Airplane {
         }
     }
 
-    pub fn update(&mut self, controls: &Controls, dt: f32) {
+    pub fn update(
+        &mut self,
+        controls: &Controls,
+        dt: f32,
+        ground: &impl Fn(f32, f32) -> (f32, Vec3),
+    ) {
         let steps = (dt / MAX_PHYSICS_STEP).ceil().max(1.0) as usize;
         let h = dt / steps as f32;
         for _ in 0..steps {
-            self.step(controls, h);
+            self.step(controls, h, ground);
         }
     }
 
-    fn step(&mut self, controls: &Controls, dt: f32) {
+    fn step(&mut self, controls: &Controls, dt: f32, ground: &impl Fn(f32, f32) -> (f32, Vec3)) {
         let aero = self.calc_aero_state();
         let defl = Deflections::from_controls(controls, self.config.control_surface_limits);
 
         let forces = self.calc_aero_forces(controls.throttle, &aero, &defl);
         let torque = self.calc_aero_moments(&aero, &defl);
+        let (ground_force, ground_torque) = self.calc_ground_forces(ground);
 
-        self.integrate_translation(forces, dt);
-        self.integrate_rotation(torque, dt);
+        self.integrate_translation(forces + ground_force, dt);
+        self.integrate_rotation(torque + ground_torque, dt);
     }
 
     fn calc_aero_state(&self) -> AeroState {
@@ -210,6 +236,74 @@ impl Airplane {
         vec3(roll_moment, -yaw_moment, pitch_moment)
     }
 
+    fn calc_ground_forces(&self, ground: &impl Fn(f32, f32) -> (f32, Vec3)) -> (Vec3, Vec3) {
+        let weight = self.config.mass * 9.81;
+
+        // Springs that hold the plane up with WHEEL_SAG of squash, with the weight shared between the wheels
+        let wheels = CONTACTS // TODO: aero shouldn't depend on the mesh module!! Put this in config!!!!
+            .iter()
+            .filter(|c| c.kind == ContactKind::Wheel)
+            .count() as f32;
+        let k_wheel = weight / (wheels * WHEEL_SAG);
+        let c_wheel = WHEEL_DAMPING * 2.0 * (k_wheel * self.config.mass / wheels).sqrt();
+
+        let omega = nalgebra_glm::quat_rotate_vec3(&self.orientation, &self.body_angular_velocity);
+        let forward = nalgebra_glm::quat_rotate_vec3(&self.orientation, &vec3(1.0, 0.0, 0.0));
+
+        let mut force = Vec3::zeros();
+        let mut torque = Vec3::zeros(); // world space, about the center of grav
+        for contact in &CONTACTS {
+            let r = nalgebra_glm::quat_rotate_vec3(&self.orientation, &contact.pos);
+            let center = self.pos + r;
+            let (h, n) = ground(center.x, center.z);
+
+            // How far the sphere is into the ground
+            let depth = contact.radius - (center.y - h) * n.y;
+            if depth <= 0.0 {
+                continue; // not colliding with the ground
+            }
+
+            // Please indicate on the sphere where the ground touched you
+            let arm = r - n * contact.radius;
+            let v = self.vel + omega.cross(&arm);
+            let v_n = v.dot(&n);
+            let v_t = v - n * v_n; // sliding along the ground
+
+            let (k, c) = match contact.kind {
+                ContactKind::Wheel => (k_wheel, c_wheel),
+                ContactKind::Airframe => (
+                    k_wheel * AIRFRAME_STIFFNESS,
+                    c_wheel * AIRFRAME_STIFFNESS.sqrt(),
+                ),
+            };
+
+            let normal_force = (k * depth - c * v_n).clamp(0.0, 30.0 * weight);
+
+            let roll_dir = forward - n * forward.dot(&n);
+            let f_t = match contact.kind {
+                ContactKind::Wheel if roll_dir.norm_squared() > 1e-4 => {
+                    // Wheels can move freely along their direction
+                    let roll_dir = roll_dir.normalize();
+                    // They grip sideways
+                    let v_roll = roll_dir * v_t.dot(&roll_dir);
+                    friction(v_roll, ROLLING_FRICTION, normal_force)
+                        + friction(v_t - v_roll, TIRE_GRIP, normal_force)
+                }
+                _ => friction(v_t, SCRAPE_FRICTION, normal_force),
+            };
+
+            let f = n * normal_force + f_t;
+            force += f;
+            torque += arm.cross(&f);
+        }
+
+        let inv_orientation = nalgebra_glm::quat_inverse(&self.orientation);
+        (
+            force,
+            nalgebra_glm::quat_rotate_vec3(&inv_orientation, &torque),
+        )
+    }
+
     fn integrate_translation(&mut self, forces: Vec3, dt: f32) {
         let accel = forces / self.config.mass;
         self.vel += accel * dt;
@@ -264,6 +358,11 @@ impl Airplane {
             .atan2(-forward.z)
             .rem_euclid(std::f32::consts::TAU)
     }
+}
+
+/// Friction against sliding at `v`, up to `mu * normal_force`
+fn friction(v: Vec3, mu: f32, normal_force: f32) -> Vec3 {
+    -v * (mu * normal_force / v.norm().max(SLIP_SPEED))
 }
 
 #[cfg(test)]
