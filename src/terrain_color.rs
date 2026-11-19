@@ -59,7 +59,7 @@ fn terrain_color(h: f32, slope: f32, max_height: f32) -> Vec3 {
 
     // Stone only where it's both high and steep
     let steep = smoothstep(0.35, 0.8, slope); // about 20° to 40°
-    let high = smoothstep(0.15, 0.4, up);
+    let high = 1.0; //smoothstep(0.15, 0.4, up);
     color = color.lerp(&Vec3::from(STONE), steep * high);
 
     color
