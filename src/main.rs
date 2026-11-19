@@ -15,6 +15,7 @@ use apricot::{
     terrain::chunks::{ChunkCoord, ChunkGrid},
 };
 use nalgebra_glm::{vec2, vec3, vec4, Mat4, Vec3};
+use sdl2::rect::Rect;
 
 use crate::{
     airplane::Airplane,
@@ -23,6 +24,7 @@ use crate::{
     engine_sound::EngineSound,
     heightmap::Heightmap,
     hud::{GAP, MARGIN, PAD},
+    minimap::{Minimap, MINIMAP_PX, MINIMAP_RANGE},
 };
 
 mod airplane;
@@ -31,6 +33,7 @@ mod control;
 mod engine_sound;
 mod heightmap;
 mod hud;
+mod minimap;
 mod plane_model;
 mod terrain_color;
 
@@ -43,22 +46,23 @@ const LOADS_PER_FRAME: usize = 2;
 // - [x] good aero model
 // - [x] joystick
 // - [x] better plane model
-//     - [ ] hat to move view (or arrow keys) to orbit
+//     - [ ] c to free mouse orbit
+//     - [ ] z to zoom in
 // - [ ] better worldgen model (like 100km, real maps, hawaii, denver)
-//     - [ ] mini map
+//     - [x] mini map
 // - [ ] weather, wind, time of day
 //     - [x] distance haze, fog
 //     - [ ] Higher LOD shadow maps for the airplane, maybe cascading shadow maps
-//     - [ ] atmospheric effects (golden hour, overcast skies, sunrise, sunset)
+//     - [x] atmospheric effects (golden hour, overcast skies, sunrise, sunset)
 //     - [ ] rain, wind, upwelling from mountains, actual raindrops when raining?
 //     - [ ] volumetric clouds that move with the wind and exist where they would exist
-//     - [ ] water should look like water (reflection, refraction, waves, etc)
-//     - [ ] terrain textures, not just a solid color (sat imagery?)
-//     - [ ] vegetation scatter, building scatter
+//     - [x] water should look like water (reflection, refraction, waves, etc)
+//     - [x] terrain textures, not just a solid color (sat imagery?)
+//     - [ ] vegetation scatter based on the actual biomes designated by terrain_color (move biomes out to its own thing, so that vegetation and color read from it?)
 //     - [ ] prop blur
 //     - [ ] control surface deflection? wing flex?
 // - [ ] camera jitter and g-force lag
-// - [ ] ground collision
+// - [ ] water/ground collision
 // - [ ] flaps, gear, slats, aerobrakes, whatever
 //     - [ ] stall horn for the cessna
 //     - [ ] g limits
@@ -91,6 +95,8 @@ struct FlightSim {
     chunks: ModelSet<ChunkCoord>,
 
     water_program: ProgramId,
+
+    minimap: Minimap,
 
     plane_mesh: MeshId,
     plane_trim_mesh: MeshId,
@@ -142,7 +148,8 @@ impl FlightSim {
             Some("water"),
         )?;
 
-        let mut light = DirectionalLight::new(vec3(1.0, 0.5, 0.0).normalize(), 2048)?;
+        let light_dir = vec3(1.0, 0.5, 0.0).normalize();
+        let mut light = DirectionalLight::new(light_dir, 2048)?;
         light.frustum.shadow_distance = 150.0;
         app.renderer.set_light(Some(&light));
 
@@ -156,8 +163,9 @@ impl FlightSim {
             prop_rps: 0.0,
             engine_rpm: 700.0,
             engine_sound: app.audio.start_synth(EngineSound::new()),
+            minimap: Minimap::new(&app.renderer, light_dir)?,
             water_program,
-            plane: Airplane::new(AirplaneConfig::dash_8()),
+            plane: Airplane::new(AirplaneConfig::piper_j3_cub()),
             controls: Controls::new(),
             map: Heightmap::load_geotiff("assets/maui.tif").expect("couldn't load heightmap"),
             chunk_grid: ChunkGrid::new(CHUNK_CELLS),
@@ -165,7 +173,7 @@ impl FlightSim {
         };
         sim.update_chunks(&app.renderer, usize::MAX); // load everything in range now
         let (w, d) = sim.map.size();
-        sim.plane.pos = vec3(50000.0, 1700.0, 50000.0);
+        sim.plane.pos = vec3(90000.0, 170.0, 50000.0);
         Ok(sim)
     }
 
@@ -175,7 +183,8 @@ impl FlightSim {
         let (sw, sh) = (screen.x as f32, screen.y as f32);
 
         self.draw_flight_panel(renderer, sw, sh);
-        self.draw_engine_panel(renderer, sh);
+        self.draw_engine_panel(renderer);
+        self.draw_minimap_panel(renderer, sh);
     }
 
     /// Draw attitude indicator stacked on the compass
@@ -212,7 +221,7 @@ impl FlightSim {
     }
 
     /// Draw altitude, speed and throttle
-    fn draw_engine_panel(&self, renderer: &RenderContext, sh: f32) {
+    fn draw_engine_panel(&self, renderer: &RenderContext) {
         let row_h = 26.0;
         let readout_w = 84.0;
         let bar_w = 12.0;
@@ -221,7 +230,7 @@ impl FlightSim {
         let inner_h = rows * row_h + (rows - 1.0) * GAP;
         let plate_w = PAD + readout_w + GAP + bar_w + PAD;
         let plate_h = PAD + inner_h + PAD;
-        let plate = Rectangle::new(MARGIN, sh - MARGIN - plate_h, plate_w, plate_h);
+        let plate = Rectangle::new(MARGIN, MARGIN, plate_w, plate_h);
         hud::draw_plate(renderer, plate);
 
         let row = |i: f32| {
@@ -258,6 +267,22 @@ impl FlightSim {
             inner_h,
         );
         hud::draw_vertical_bar(renderer, bar, self.controls.throttle);
+    }
+
+    fn draw_minimap_panel(&self, renderer: &RenderContext, sh: f32) {
+        let r = hud::INSTRUMENT_R;
+        let plate_size = PAD + 2.0 * r + PAD;
+        let plate = Rectangle::new(MARGIN, sh - MARGIN - plate_size, plate_size, plate_size);
+        hud::draw_plate(renderer, plate);
+        hud::draw_minimap(
+            renderer,
+            plate.pos + vec2(PAD + r, PAD + r),
+            r,
+            self.minimap.minimap.texture,
+            MINIMAP_PX as f32,
+            self.plane.heading(),
+            MINIMAP_RANGE,
+        );
     }
 
     fn update_chunks(&mut self, renderer: &RenderContext, max_loads: usize) {
@@ -398,6 +423,16 @@ impl Scene for FlightSim {
             &nalgebra_glm::translation(&vec3(self.plane.pos.x, 0.0, self.plane.pos.z)),
             &vec3(sea_size, 1.0, sea_size),
         );
+
+        self.minimap.render(
+            renderer,
+            sea,
+            &self.plane,
+            &self.map,
+            &self.chunks,
+            &self.light,
+        );
+
         let plane_model = self.plane.model_matrix();
 
         let prop_model = nalgebra_glm::rotate_x(
