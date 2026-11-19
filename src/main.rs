@@ -6,12 +6,15 @@ use apricot::{
     geometry::rectangle::Rectangle,
     input::Scancode,
     model_set::{Model, ModelSet},
-    render::assets::{MeshId, ProgramId},
-    render::lighting::DirectionalLight,
-    render::RenderContext,
+    opengl::DrawOptions,
+    render::{
+        assets::{MeshId, ProgramId},
+        lighting::DirectionalLight,
+        RenderContext,
+    },
     terrain::chunks::{ChunkCoord, ChunkGrid},
 };
-use nalgebra_glm::{vec2, vec3, vec4, Mat4};
+use nalgebra_glm::{vec2, vec3, vec4, Mat4, Vec3};
 
 use crate::{
     airplane::Airplane,
@@ -33,7 +36,7 @@ mod terrain_color;
 
 const CAMERA_FAR: f32 = 50_000.0;
 const CHUNK_CELLS: u32 = 64; // 64 × 30 m ≈ 2 km per chunk
-const LOAD_RADIUS: i32 = 10; // chunks
+const LOAD_RADIUS: i32 = 15; // chunks
 const LOADS_PER_FRAME: usize = 2;
 
 // todo:
@@ -44,7 +47,7 @@ const LOADS_PER_FRAME: usize = 2;
 // - [ ] better worldgen model (like 100km, real maps, hawaii, denver)
 //     - [ ] mini map
 // - [ ] weather, wind, time of day
-//     - [ ] distance haze, fog
+//     - [x] distance haze, fog
 //     - [ ] Higher LOD shadow maps for the airplane, maybe cascading shadow maps
 //     - [ ] atmospheric effects (golden hour, overcast skies, sunrise, sunset)
 //     - [ ] rain, wind, upwelling from mountains, actual raindrops when raining?
@@ -87,7 +90,7 @@ struct FlightSim {
     chunk_grid: ChunkGrid,
     chunks: ModelSet<ChunkCoord>,
 
-    sky_program: ProgramId,
+    water_program: ProgramId,
 
     plane_mesh: MeshId,
     plane_trim_mesh: MeshId,
@@ -102,6 +105,12 @@ struct FlightSim {
     controls: Controls,
 }
 
+macro_rules! frag {
+    ($($file:literal),+ $(,)?) => {
+        concat!("#version 330 core\n", $(include_str!($file), "\n"),+)
+    };
+}
+
 impl FlightSim {
     fn new(app: &App) -> Result<Self, Error> {
         let renderer = &app.renderer;
@@ -109,17 +118,29 @@ impl FlightSim {
         // Replace the default 3d shader with our super cool epic shader
         renderer.add_program_from_source(
             include_str!("shaders/3d.vert"),
-            include_str!("shaders/3d.frag"),
+            frag!(
+                "shaders/lighting.glsl",
+                "shaders/atmosphere.glsl",
+                "shaders/3d.frag",
+            ),
             Some("3d"),
         )?;
-
-        let sky_program = renderer.add_program_from_source(
+        renderer.add_program_from_source(
             include_str!("shaders/sky.vert"),
-            include_str!("shaders/sky.frag"),
+            frag!("shaders/atmosphere.glsl", "shaders/sky.frag",),
             Some("sky"),
         )?;
+        let water_program = renderer.add_program_from_source(
+            include_str!("shaders/3d.vert"),
+            frag!(
+                "shaders/atmosphere.glsl",
+                "shaders/lighting.glsl",
+                "shaders/water.frag"
+            ),
+            Some("water"),
+        )?;
 
-        let mut light = DirectionalLight::new(vec3(0.6, 0.8, 0.3), 2048)?;
+        let mut light = DirectionalLight::new(vec3(0.6, 0.5, 0.3).normalize(), 2048)?;
         light.frustum.shadow_distance = 150.0;
         app.renderer.set_light(Some(&light));
 
@@ -129,11 +150,11 @@ impl FlightSim {
             plane_mesh: renderer.add_mesh_data(plane_model.body, None),
             plane_trim_mesh: renderer.add_mesh_data(plane_model.trim, None),
             plane_prop_mesh: renderer.add_mesh_data(plane_model.prop, None),
-            sky_program,
             prop_angle: 0.0,
             prop_rps: 0.0,
             engine_rpm: 700.0,
             engine_sound: app.audio.start_synth(EngineSound::new()),
+            water_program,
             plane: Airplane::new(AirplaneConfig::dash_8()),
             controls: Controls::new(),
             map: Heightmap::load_geotiff("assets/maui.tif").expect("couldn't load heightmap"),
@@ -382,10 +403,6 @@ impl Scene for FlightSim {
         );
 
         let p = renderer.builtins.program_3d;
-        renderer
-            .uniform(p, "u_fog_color")
-            .set_vec3(&vec3(0.70, 0.80, 0.90));
-        renderer.uniform(p, "u_fog_density").set_f32(0.0003);
 
         renderer.shadow_pass(&mut self.light, |pass| {
             pass.draw(self.plane_mesh, plane_model);
@@ -395,9 +412,18 @@ impl Scene for FlightSim {
         });
 
         renderer.clear(vec4(0.6, 0.8, 0.95, 1.0));
+        renderer.draw_sky(self.light.direction());
         self.chunks.draw(renderer);
         // See-through, so drawn after the land
-        renderer.draw_mesh(renderer.builtins.plane, sea, vec4(0.15, 0.4, 0.75, 0.7));
+        renderer
+            .uniform(self.water_program, "u_time")
+            .set_f32((app.seconds % 1000.0) as f32);
+        renderer.draw_mesh_with_program(
+            self.water_program,
+            renderer.builtins.plane,
+            sea,
+            &DrawOptions::default(),
+        );
 
         renderer.draw_mesh(self.plane_mesh, plane_model, vec4(0.9, 0.9, 0.9, 1.0));
         renderer.draw_mesh(
