@@ -1,6 +1,7 @@
 uniform vec3 u_sun_dir;
 uniform vec3 u_camera_pos;
 uniform float u_time;
+uniform int u_minimap; // 1 while drawing the minimap, no air between the camera and the ground
 
 in vec3 v_world_pos;
 out vec4 color;
@@ -95,7 +96,11 @@ void main() {
 
     vec3 water = mix(body, sky_refl, fresnel) + glint;
 
-    vec3 trans;
-    vec3 inscatter = scatter(u_camera_pos.y, v, l, air_distance(dist), 8, trans);
+    vec3 trans = vec3(1.0);
+    vec3 inscatter = vec3(0.0);
+    if (u_minimap == 0) {
+        inscatter = scatter(u_camera_pos.y, view / dist, l, air_distance(dist), 8, trans);
+    }
+
     color = vec4(tonemap(water * trans + inscatter), 1.0);
 }

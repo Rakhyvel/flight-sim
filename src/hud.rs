@@ -1,12 +1,16 @@
 //! Flight instruments
 
-use apricot::{geometry::rectangle::Rectangle, render::RenderContext};
+use apricot::{
+    geometry::rectangle::Rectangle,
+    render::{assets::TextureId, RenderContext},
+};
 use nalgebra_glm::{vec2, Vec2, Vec4};
 
 // Layout
 pub const MARGIN: f32 = 6.0; // screen edge to panel
 pub const PAD: f32 = 6.0; // panel edge to contents
 pub const GAP: f32 = 6.0; // between items on a panel
+pub const INSTRUMENT_R: f32 = 75.0;
 
 // Colors
 const PANEL: Vec4 = Vec4::new(0.0, 0.0, 0.0, 0.3);
@@ -165,4 +169,37 @@ pub fn draw_compass(renderer: &RenderContext, window: Rectangle, heading_deg: f3
 
     renderer.pop_clip();
     renderer.draw_rect(window, 1.0, OUTLINE);
+}
+
+pub fn draw_minimap(
+    renderer: &RenderContext,
+    center: Vec2,
+    r: f32,
+    map: TextureId,
+    map_px: f32,
+    heading: f32,
+    range_m: f32,
+) {
+    let square = Rectangle::new(center.x - r, center.y - r, 2.0 * r, 2.0 * r);
+    renderer.draw_texture(
+        map,
+        square,
+        Rectangle::new(0.0, map_px, map_px, -map_px),
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+    );
+
+    // The plane is always pointing up
+    let tip = center + vec2(0.0, -7.0);
+    let left = center + vec2(-6.0, 6.0);
+    let notch = center + vec2(0.0, 3.0);
+    let right = center + vec2(6.0, 6.0);
+    for (a, b) in [(tip, left), (left, notch), (notch, right), (right, tip)] {
+        renderer.draw_line(a, b, 2.0, ACCENT);
+    }
+
+    // North turns the opposite way to the plane
+    let north = vec2(-heading.sin(), -heading.cos()); // screen space, y down
+    let n_pos = center + north * (r - 10.0);
+    let n_size = renderer.measure_text("N");
+    renderer.draw_text(n_pos - n_size / 2.0, "N", TEXT);
 }

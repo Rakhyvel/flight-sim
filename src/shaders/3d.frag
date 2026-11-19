@@ -3,6 +3,7 @@ uniform vec4 u_color;
 uniform vec3 u_sun_dir;
 uniform vec3 u_camera_pos;
 uniform float u_detail; // 1 for noise, 0 for everything else
+uniform int u_minimap; // 1 while drawing the minimap, no air between the camera and the ground
 
 in vec3 v_normal;
 in vec2 v_uv;
@@ -54,10 +55,13 @@ void main() {
     vec3 lit = albedo / PI * (sun * diffuse + skylight);
 
     // Dim far away surfaces and add air
-    vec3 view = v_world_pos - u_camera_pos;
-    float dist = length(view);
-    vec3 trans;
-    vec3 inscatter = scatter(u_camera_pos.y, view / dist, l, air_distance(dist), 8, trans);
+    vec3 trans = vec3(1.0);
+    vec3 inscatter = vec3(0.0);
+    if (u_minimap == 0) {
+        vec3 view = v_world_pos - u_camera_pos;
+        float dist = length(view);
+        inscatter = scatter(u_camera_pos.y, view / dist, l, air_distance(dist), 8, trans);
+    }
 
     color = vec4(tonemap(lit * trans + inscatter), base.a);
 }
