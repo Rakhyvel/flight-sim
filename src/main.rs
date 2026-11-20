@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use apricot::{
     app::{run, App, AppConfig, Scene, SceneCommand},
     audio::SynthStream,
@@ -25,6 +27,8 @@ use crate::{
     heightmap::Heightmap,
     hud::{GAP, MARGIN, PAD},
     minimap::{Minimap, MINIMAP_PX, MINIMAP_RANGE},
+    region::{load_regions, Region},
+    world::World,
 };
 
 mod airplane;
@@ -36,12 +40,12 @@ mod heightmap;
 mod hud;
 mod minimap;
 mod plane_model;
+mod region;
 mod runway_model;
 mod terrain_color;
+mod world;
 
-const CAMERA_FAR: f32 = 50_000.0;
-const CHUNK_CELLS: u32 = 64; // 64 × 30 m ≈ 2 km per chunk
-const LOAD_RADIUS: i32 = 15; // chunks
+const CAMERA_FAR: f32 = 60_000.0;
 const LOADS_PER_FRAME: usize = 2;
 
 // todo:
@@ -92,15 +96,12 @@ fn main() -> Result<(), Error> {
 struct FlightSim {
     light: DirectionalLight,
 
-    map: Heightmap,
-    chunk_grid: ChunkGrid,
-    chunks: ModelSet<ChunkCoord>,
-
     water_program: ProgramId,
+
+    world: World,
 
     minimap: Minimap,
 
-    runway_meshes: Vec<(MeshId, MeshId)>,
     plane_mesh: MeshId,
     plane_trim_mesh: MeshId,
     plane_prop_mesh: MeshId,
@@ -156,6 +157,13 @@ impl FlightSim {
         light.frustum.shadow_distance = 150.0;
         app.renderer.set_light(Some(&light));
 
+        let regions = load_regions("assets/regions.toml");
+        let region = regions
+            .iter()
+            .find(|r| r.name == "Denver")
+            .expect("no region");
+        let world = World::load(renderer, region).expect("couldnt load region");
+
         let plane_model = plane_model::airplane_model();
         let mut sim = Self {
             light,
@@ -166,46 +174,18 @@ impl FlightSim {
             prop_rps: 0.0,
             engine_rpm: 700.0,
             engine_sound: app.audio.start_synth(EngineSound::new()),
+            world,
             minimap: Minimap::new(&app.renderer, light_dir)?,
-            runway_meshes: vec![],
             water_program,
             plane: Airplane::new(AirplaneConfig::cessna172()),
             controls: Controls::new(),
-            map: Heightmap::load_geotiff("assets/maui.tif").expect("couldn't load heightmap"),
-            chunk_grid: ChunkGrid::new(CHUNK_CELLS),
-            chunks: ModelSet::new(),
         };
 
-        // TODO: The setting config file should specify which airports are available
-        let runways =
-            airport::load_runways("assets/runways.csv", "PHOG").expect("couldn't read runways.csv");
-        let runway = runways
-            .iter()
-            .find(|r| r.name == "PHOG 02")
-            .expect("no runway PHOG 02");
-        let strips: Vec<_> = runways
-            .iter()
-            .step_by(2)
-            .map(|r| {
-                (
-                    sim.map.geo.to_world(r.start.0, r.start.1),
-                    sim.map.geo.to_world(r.end.0, r.end.1),
-                    r.width,
-                )
-            })
-            .collect();
-        for &(a, b, width) in &strips {
-            sim.map.flatten_runway(a, b, width);
-        }
-        for &(a, b, width) in &strips {
-            let (asphalt, marks) =
-                runway_model::runway_meshes(a, b, width, |x, z| sim.map.ground(x, z));
-            sim.runway_meshes.push((
-                app.renderer.add_mesh_data(asphalt, None),
-                app.renderer.add_mesh_data(marks, None),
-            ))
-        }
-        sim.spawn_on_runway(&app.renderer, runway);
+        let runway = sim.world.runway("KBJC 03").expect("no runway");
+        let (spot, heading) = sim.world.spawn_point(runway);
+        sim.plane.place(spot + vec3(0.0, 1.5, 0.0), heading);
+        sim.world.update(renderer, sim.plane.pos, usize::MAX);
+
         Ok(sim)
     }
 
@@ -326,78 +306,6 @@ impl FlightSim {
             MINIMAP_RANGE,
         );
     }
-
-    fn update_chunks(&mut self, renderer: &RenderContext, max_loads: usize) {
-        let (sx, sz) = (self.map.spacing_x, self.map.spacing_z);
-        let cell_pos = vec3(self.plane.pos.x / sx, 0.0, self.plane.pos.z / sz);
-
-        let (w, d) = self.map.size();
-        let max_cx = (w as u32).div_ceil(CHUNK_CELLS) as i32;
-        let max_cz = (d as u32).div_ceil(CHUNK_CELLS) as i32;
-
-        // Closest first, and only chunks that are actually on the map
-        let wanted: Vec<ChunkCoord> = self
-            .chunk_grid
-            .chunks_near(cell_pos, LOAD_RADIUS)
-            .into_iter()
-            .filter(|c| c.x >= 0 && c.z >= 0 && c.x < max_cx && c.z < max_cz)
-            .collect();
-
-        // Unload anything that's dropped out of range
-        let stale: Vec<ChunkCoord> = self
-            .chunks
-            .iter()
-            .map(|(k, _)| k)
-            .filter(|k| !wanted.contains(k))
-            .collect();
-        for k in stale {
-            if let Some(model) = self.chunks.remove(k) {
-                renderer.unload_mesh(model.mesh);
-            }
-        }
-
-        let missing: Vec<ChunkCoord> = wanted
-            .into_iter()
-            .filter(|&c| self.chunks.get(c).is_none())
-            .take(max_loads)
-            .collect();
-
-        // Build a few missing chunks per frame, so flying fast doesn't cause a hitch
-        let map = &self.map; // borrow just the map, so the closure doesn't borrow all of self
-        for chunk in missing {
-            let mesh = self
-                .chunk_grid
-                .mesh_smooth(chunk, |x, z| map.sample(x as i32, z as i32));
-            let mesh_id = renderer.add_mesh_data(mesh, None);
-
-            let o = self.chunk_grid.origin(chunk);
-            let origin = vec3(o.x * sx, 0.0, o.z * sz);
-            let transform =
-                nalgebra_glm::scale(&nalgebra_glm::translation(&origin), &vec3(sx, 1.0, sz));
-
-            let pixels = terrain_color::chunk_texture(map, &self.chunk_grid, chunk);
-            let texture = renderer.create_texture_rgba(CHUNK_CELLS, CHUNK_CELLS, &pixels);
-            renderer.get_texture_from_id(texture).set_smooth(true);
-
-            self.chunks
-                .insert(renderer, chunk, Model::new(mesh_id, texture, transform));
-        }
-    }
-
-    fn spawn_on_runway(&mut self, renderer: &RenderContext, runway: &Runway) {
-        let a = self.map.geo.to_world(runway.start.0, runway.start.1);
-        let b = self.map.geo.to_world(runway.end.0, runway.end.1);
-        let dir = (b - a).normalize();
-        let heading = dir.x.atan2(-dir.y);
-
-        let spot = a + dir * 30.0; // A little past the threshold
-        let (ground, _) = self.map.ground(spot.x, spot.y);
-        self.plane
-            .place(vec3(spot.x, ground + 1.5, spot.y), heading); // spawn it a bit high up for the wheels (TODO: Config!!!)
-
-        // Load the terrain around the spot
-        self.update_chunks(renderer, usize::MAX);
-    }
 }
 
 impl Scene for FlightSim {
@@ -409,10 +317,10 @@ impl Scene for FlightSim {
         self.controls.update_input(&app.input, app.dt.as_secs_f32());
         self.plane
             .update(&self.controls, app.dt.as_secs_f32(), &|x, z| {
-                self.map.ground(x, z)
+                self.world.ground(x, z)
             });
-
-        self.update_chunks(&app.renderer, LOADS_PER_FRAME);
+        self.world
+            .update(&app.renderer, self.plane.pos, LOADS_PER_FRAME);
 
         let dt = app.dt.as_secs_f32();
         // For fixed speed props
@@ -488,8 +396,8 @@ impl Scene for FlightSim {
             renderer,
             sea,
             &self.plane,
-            &self.map,
-            &self.chunks,
+            &self.world.map,
+            &self.world.chunks,
             &self.light,
         );
 
@@ -506,47 +414,13 @@ impl Scene for FlightSim {
             pass.draw(self.plane_mesh, plane_model);
             pass.draw(self.plane_trim_mesh, plane_model);
             pass.draw(self.plane_prop_mesh, prop_model);
-            self.chunks.draw_shadows(pass);
+            // self.world.draw_shadows(&mut pass);
         });
 
         renderer.clear(vec4(0.6, 0.8, 0.95, 1.0));
         renderer.draw_sky(self.light.direction());
 
-        // Draw the terrain (with noise)
-        renderer
-            .uniform(renderer.builtins.program_3d, "u_detail")
-            .set_f32(1.0);
-        self.chunks.draw(renderer);
-
-        let asphalt = DrawOptions {
-            depth_bias: Some((-1.0, -4.0)),
-            ..Default::default()
-        };
-        let paint = DrawOptions {
-            depth_bias: Some((-2.0, -8.0)),
-            ..Default::default()
-        };
-        for &(surface, marks) in &self.runway_meshes {
-            renderer.draw_mesh_textured_with(
-                surface,
-                renderer.builtins.white_texture,
-                Mat4::identity(),
-                vec4(0.33, 0.33, 0.34, 1.0),
-                &asphalt,
-            );
-            renderer.draw_mesh_textured_with(
-                marks,
-                renderer.builtins.white_texture,
-                Mat4::identity(),
-                vec4(0.85, 0.85, 0.82, 1.0),
-                &paint,
-            );
-        }
-
-        // Reset the noise to 0.0 for everything else
-        renderer
-            .uniform(renderer.builtins.program_3d, "u_detail")
-            .set_f32(0.0);
+        self.world.draw(renderer);
 
         // Draw the water
         renderer

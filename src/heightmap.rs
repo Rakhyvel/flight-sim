@@ -236,6 +236,14 @@ impl Heightmap {
             (p.y / self.spacing_z).round() as i32,
         )
     }
+
+    /// Whether (lat, long) [deg] is on the map, at least `inset` [m] from the edge
+    pub fn contains_lat_lon(&self, lat: f64, lon: f64, inset: f32) -> bool {
+        let p = self.geo.to_world(lat, lon);
+        let max_x = (self.width - 1) as f32 * self.spacing_x;
+        let max_z = (self.depth - 1) as f32 * self.spacing_z;
+        p.x >= inset && p.y >= inset && p.x <= max_x - inset && p.y <= max_z - inset
+    }
 }
 
 #[cfg(test)]

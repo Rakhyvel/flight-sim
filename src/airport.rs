@@ -25,13 +25,17 @@ struct RunwayRow {
     he_longitude_deg: Option<f64>,
     #[serde(deserialize_with = "csv::invalid_option")]
     width_ft: Option<f64>,
+    surface: String,
 }
 
-pub fn load_runways(path: &str, airport: &str) -> Result<Vec<Runway>, Box<dyn Error>> {
+pub fn load_runways(
+    path: &str,
+    keep: impl Fn((f64, f64), (f64, f64)) -> bool,
+) -> Result<Vec<Runway>, Box<dyn Error>> {
     let mut runways = Vec::new();
     for row in csv::Reader::from_path(path)?.deserialize() {
         let row: RunwayRow = row?;
-        if row.airport_ident != airport || row.closed != 0 {
+        if row.closed != 0 || row.surface.to_uppercase().starts_with("WAT") {
             continue;
         }
 
@@ -44,17 +48,20 @@ pub fn load_runways(path: &str, airport: &str) -> Result<Vec<Runway>, Box<dyn Er
             continue;
         };
         let (le, he) = ((le_lat, le_lon), (he_lat, he_lon));
+        if !keep(le, he) {
+            continue;
+        }
         let width = (row.width_ft.unwrap_or(100.0) * 0.3048) as f32;
         runways.push(Runway {
-            name: format!("{airport} {}", row.le_ident),
+            name: format!("{} {}", row.airport_ident, row.le_ident),
             start: le,
             end: he,
             width,
         });
         runways.push(Runway {
-            name: format!("{airport} {}", row.he_ident),
-            start: le,
-            end: he,
+            name: format!("{} {}", row.airport_ident, row.he_ident),
+            start: he,
+            end: le,
             width,
         });
     }
