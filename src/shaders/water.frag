@@ -35,7 +35,7 @@ vec2 wave_slope(vec2 p, float t, out float filtered) {
         float fi = float(i);
 
         // A random wind-like direction for each octave, and a random phase
-        float angle = (hash(vec2(fi, 1.7)) - 0.5) * 2.4;
+        float angle = (hash(vec2(fi, 1.7)) - 0.5) * 1.0;
         vec2 dir = mat2(cos(angle), sin(angle), -sin(angle), cos(angle)) * WIND_DIR;
         float phase0 = hash(vec2(fi, 9.1)) * 6.2832;
 

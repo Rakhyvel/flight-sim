@@ -11,7 +11,10 @@ pub const PROP_HUB: Vec3 = Vec3::new(2.42, -0.02, 0.0);
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ContactKind {
     /// Smoothly roll across the ground
-    Wheel,
+    Wheel {
+        /// Whether this wheel has brakes
+        brakes: bool,
+    },
     /// Agressively scrape against the ground
     Airframe,
 }
@@ -26,11 +29,11 @@ pub struct ContactPoint {
     pub kind: ContactKind,
 }
 
-const fn wheel(x: f32, y: f32, z: f32, radius: f32) -> ContactPoint {
+const fn wheel(x: f32, y: f32, z: f32, radius: f32, brakes: bool) -> ContactPoint {
     ContactPoint {
         pos: Vec3::new(x, y, z),
         radius,
-        kind: ContactKind::Wheel,
+        kind: ContactKind::Wheel { brakes },
     }
 }
 
@@ -44,9 +47,9 @@ const fn airframe(x: f32, y: f32, z: f32) -> ContactPoint {
 
 pub const CONTACTS: [ContactPoint; 10] = [
     // Gear
-    wheel(-0.5, -1.1, -1.2, 0.25),
-    wheel(-0.5, -1.1, 1.2, 0.25),
-    wheel(1.9, -1.05, 0.0, 0.2),
+    wheel(-0.5, -1.1, -1.2, 0.25, true),
+    wheel(-0.5, -1.1, 1.2, 0.25, true),
+    wheel(1.9, -1.05, 0.0, 0.2, false),
     // Wingtips
     airframe(-0.3, 0.9, -5.5), // left
     airframe(-0.3, 0.9, 5.5),  // right
