@@ -38,3 +38,4 @@ lazy_static = "*"
 num-format = "0.4"
 
 tiff = "0.9"
+csv = "1"
