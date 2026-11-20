@@ -21,6 +21,8 @@ const ROLLING_FRICTION: f32 = 0.02;
 const SCRAPE_FRICTION: f32 = 0.5;
 /// Speed to ease off friction [m/s]
 const SLIP_SPEED: f32 = 0.3;
+/// How much full brakes add to the rolling wheel friction
+const MAX_BRAKE_FRICTION: f32 = 0.3;
 
 // TODO:
 // - split this off into RigidBodyState {pos, vel, orient, ang vel} and Deriv{vel, accel, ang vel, ang acc}, then define derivative() on Airplane for RK4
@@ -97,7 +99,7 @@ impl Airplane {
 
         let forces = self.calc_aero_forces(controls.throttle, &aero, &defl);
         let torque = self.calc_aero_moments(&aero, &defl);
-        let (ground_force, ground_torque) = self.calc_ground_forces(ground);
+        let (ground_force, ground_torque) = self.calc_ground_forces(controls.brakes, ground);
 
         self.integrate_translation(forces + ground_force, dt);
         self.integrate_rotation(torque + ground_torque, dt);
@@ -236,13 +238,17 @@ impl Airplane {
         vec3(roll_moment, -yaw_moment, pitch_moment)
     }
 
-    fn calc_ground_forces(&self, ground: &impl Fn(f32, f32) -> (f32, Vec3)) -> (Vec3, Vec3) {
+    fn calc_ground_forces(
+        &self,
+        brake_fraction: f32,
+        ground: &impl Fn(f32, f32) -> (f32, Vec3),
+    ) -> (Vec3, Vec3) {
         let weight = self.config.mass * 9.81;
 
         // Springs that hold the plane up with WHEEL_SAG of squash, with the weight shared between the wheels
         let wheels = CONTACTS // TODO: aero shouldn't depend on the mesh module!! Put this in config!!!!
             .iter()
-            .filter(|c| c.kind == ContactKind::Wheel)
+            .filter(|c| matches!(c.kind, ContactKind::Wheel { .. }))
             .count() as f32;
         let k_wheel = weight / (wheels * WHEEL_SAG);
         let c_wheel = WHEEL_DAMPING * 2.0 * (k_wheel * self.config.mass / wheels).sqrt();
@@ -270,7 +276,7 @@ impl Airplane {
             let v_t = v - n * v_n; // sliding along the ground
 
             let (k, c) = match contact.kind {
-                ContactKind::Wheel => (k_wheel, c_wheel),
+                ContactKind::Wheel { .. } => (k_wheel, c_wheel),
                 ContactKind::Airframe => (
                     k_wheel * AIRFRAME_STIFFNESS,
                     c_wheel * AIRFRAME_STIFFNESS.sqrt(),
@@ -281,13 +287,26 @@ impl Airplane {
 
             let roll_dir = forward - n * forward.dot(&n);
             let f_t = match contact.kind {
-                ContactKind::Wheel if roll_dir.norm_squared() > 1e-4 => {
+                ContactKind::Wheel { brakes } if roll_dir.norm_squared() > 1e-4 => {
                     // Wheels can move freely along their direction
                     let roll_dir = roll_dir.normalize();
+                    // How much friction the brakes for this wheel adds
+                    let brake_friction =
+                        if brakes { brake_fraction } else { 0.0 } * MAX_BRAKE_FRICTION;
                     // They grip sideways
                     let v_roll = roll_dir * v_t.dot(&roll_dir);
-                    friction(v_roll, ROLLING_FRICTION, normal_force)
-                        + friction(v_t - v_roll, TIRE_GRIP, normal_force)
+
+                    let roll = friction(v_roll, ROLLING_FRICTION + brake_friction, normal_force);
+                    let side = friction(v_t - v_roll, TIRE_GRIP, normal_force);
+
+                    // Budget the braking
+                    let total = roll + side;
+                    let max = TIRE_GRIP * normal_force;
+                    if total.norm() > max {
+                        total * (max / total.norm())
+                    } else {
+                        total
+                    }
                 }
                 _ => friction(v_t, SCRAPE_FRICTION, normal_force),
             };

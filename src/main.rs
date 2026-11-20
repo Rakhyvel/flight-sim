@@ -225,7 +225,7 @@ impl FlightSim {
         let row_h = 26.0;
         let readout_w = 84.0;
         let bar_w = 12.0;
-        let rows = 3.0;
+        let rows = 4.0;
 
         let inner_h = rows * row_h + (rows - 1.0) * GAP;
         let plate_w = PAD + readout_w + GAP + bar_w + PAD;
@@ -258,6 +258,16 @@ impl FlightSim {
             row(2.0),
             "THR",
             &format!("{:.0}%", self.controls.throttle * 100.0),
+        );
+        hud::draw_readout(
+            renderer,
+            row(3.0),
+            "BRK",
+            if self.controls.brakes > 0.5 {
+                "ON"
+            } else {
+                "OFF"
+            },
         );
 
         let bar = Rectangle::new(
