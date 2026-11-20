@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use apricot::{
     app::{run, App, AppConfig, Scene, SceneCommand},
     audio::SynthStream,
@@ -7,27 +5,23 @@ use apricot::{
     error::Error,
     geometry::rectangle::Rectangle,
     input::Scancode,
-    model_set::{Model, ModelSet},
     opengl::DrawOptions,
     render::{
         assets::{MeshId, ProgramId},
         lighting::DirectionalLight,
         RenderContext,
     },
-    terrain::chunks::{ChunkCoord, ChunkGrid},
 };
 use nalgebra_glm::{vec2, vec3, vec4, Mat4};
 
 use crate::{
     airplane::Airplane,
-    airport::Runway,
     config::AirplaneConfig,
     control::Controls,
     engine_sound::EngineSound,
-    heightmap::Heightmap,
     hud::{GAP, MARGIN, PAD},
-    minimap::{Minimap, MINIMAP_PX, MINIMAP_RANGE},
-    region::{load_regions, Region},
+    minimap::{Minimap, MINIMAP_PX},
+    region::load_regions,
     world::World,
 };
 
@@ -303,7 +297,6 @@ impl FlightSim {
             self.minimap.minimap.texture,
             MINIMAP_PX as f32,
             self.plane.heading(),
-            MINIMAP_RANGE,
         );
     }
 }
@@ -407,8 +400,6 @@ impl Scene for FlightSim {
             &nalgebra_glm::translate(&plane_model, &plane_model::PROP_HUB),
             self.prop_angle,
         );
-
-        let p = renderer.builtins.program_3d;
 
         renderer.shadow_pass(&mut self.light, |pass| {
             pass.draw(self.plane_mesh, plane_model);

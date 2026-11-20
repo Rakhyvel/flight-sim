@@ -178,7 +178,6 @@ pub fn draw_minimap(
     map: TextureId,
     map_px: f32,
     heading: f32,
-    range_m: f32,
 ) {
     let square = Rectangle::new(center.x - r, center.y - r, 2.0 * r, 2.0 * r);
     renderer.draw_texture(
