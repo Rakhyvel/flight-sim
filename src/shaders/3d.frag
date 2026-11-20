@@ -4,6 +4,7 @@ uniform vec3 u_sun_dir;
 uniform vec3 u_camera_pos;
 uniform float u_detail; // 1 for noise, 0 for everything else
 uniform int u_minimap; // 1 while drawing the minimap, no air between the camera and the ground
+uniform vec2 u_origin;
 
 in vec3 v_normal;
 in vec2 v_uv;
@@ -41,7 +42,7 @@ void main() {
 
     vec4 base = texture(u_texture, v_uv) * u_color;
     vec3 albedo = pow(base.rgb, vec3(2.2)); // convert color to linear
-    albedo *= 1.0 + 0.6 * ground_detail(v_world_pos.xz) * u_detail;
+    albedo *= 1.0 + 0.6 * ground_detail(v_world_pos.xz + u_origin) * u_detail;
 
     // Direct sun, colored by the atmosphere
     vec3 sun = sun_light(v_world_pos.y, l);

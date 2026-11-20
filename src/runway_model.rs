@@ -1,5 +1,5 @@
 use apricot::mesh::{MeshData, Vertex};
-use nalgebra_glm::{vec2, vec3, Vec2, Vec3};
+use nalgebra_glm::{vec2, vec3, DVec2, Vec2, Vec3};
 
 /// How far the runway floats above the ground it's graded into [m]. Depth bias does the rest
 const LIFT: f32 = 0.05;
@@ -7,21 +7,22 @@ const LIFT: f32 = 0.05;
 /// Asphalt, and white markings, for a runway from world `a` to `b` (x, z) [m] that's `width` wide.
 /// `ground` gives the height and normal at a world (x, z)
 pub fn runway_meshes(
-    a: Vec2,
-    b: Vec2,
+    a: DVec2,
+    b: DVec2,
     width: f32,
-    ground: impl Fn(f32, f32) -> (f32, Vec3),
+    ground: impl Fn(f64, f64) -> (f32, Vec3),
 ) -> (MeshData, MeshData) {
-    let len = (b - a).norm();
-    let fwd = (b - a) / len;
+    let len = (b - a).norm() as f32;
+    let fwd: Vec2 = ((b - a) / (b - a).norm()).cast();
     let right = vec2(-fwd.y, fwd.x); // world x/z, so north (0, -1) gives east (1, 0)
     let half = 0.5 * width;
 
     // A rectangle from `t0` to `t1` along the runway and `s0` to `s1` across it (right is +)
     let rect = |t0: f32, t1: f32, s0: f32, s1: f32| {
         [(t0, s0), (t0, s1), (t1, s0), (t1, s1)].map(|(t, s)| {
-            let p = a + fwd * t + right * s;
-            let (h, n) = ground(p.x, p.y);
+            let p = fwd * t + right * s;
+            let world = a + p.cast::<f64>();
+            let (h, n) = ground(world.x, world.y);
             (vec3(p.x, h + LIFT, p.y), n)
         })
     };

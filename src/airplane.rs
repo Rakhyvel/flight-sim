@@ -1,6 +1,7 @@
-use std::f32::consts::FRAC_PI_2;
+use std::f64::consts::FRAC_PI_2;
 
-use nalgebra_glm::{vec3, Mat3, Mat4, Quat, Vec3};
+use apricot::camera::floating_origin::FloatingOrigin;
+use nalgebra_glm::{vec3, DMat3, DQuat, DVec3, Mat4, Vec3};
 
 use crate::{
     config::AirplaneConfig,
@@ -10,63 +11,63 @@ use crate::{
 
 // TODO: These should prob come from config
 /// How far the gear squishes down when the plane is sitting still [m]
-const WHEEL_SAG: f32 = 0.05;
+const WHEEL_SAG: f64 = 0.05;
 /// Fraction of critical damping
-const WHEEL_DAMPING: f32 = 0.6;
+const WHEEL_DAMPING: f64 = 0.6;
 /// How much stiffer the airframe is than the tires (?)
-const AIRFRAME_STIFFNESS: f32 = 4.0;
+const AIRFRAME_STIFFNESS: f64 = 4.0;
 /// Tire sideways friction coeff
-const TIRE_GRIP: f32 = 0.8;
+const TIRE_GRIP: f64 = 0.8;
 /// Tire rolling friciton coeff
-const ROLLING_FRICTION: f32 = 0.02;
+const ROLLING_FRICTION: f64 = 0.02;
 /// Airframe scraping coeff
-const SCRAPE_FRICTION: f32 = 0.5;
+const SCRAPE_FRICTION: f64 = 0.5;
 /// Speed to ease off friction [m/s]
-const SLIP_SPEED: f32 = 0.3;
+const SLIP_SPEED: f64 = 0.3;
 /// How much full brakes add to the rolling wheel friction
-const MAX_BRAKE_FRICTION: f32 = 0.3;
+const MAX_BRAKE_FRICTION: f64 = 0.3;
 
 // TODO:
 // - split this off into RigidBodyState {pos, vel, orient, ang vel} and Deriv{vel, accel, ang vel, ang acc}, then define derivative() on Airplane for RK4
 pub struct Airplane {
     // State
     /// World position of the plane [m]
-    pub pos: Vec3,
+    pub pos: DVec3,
     /// World velocity of the plane [m/s]
-    pub vel: Vec3,
+    pub vel: DVec3,
     /// World orientation of the plane [rad]
-    pub orientation: Quat,
+    pub orientation: DQuat,
     /// Body-space angular velocity of the plan [rad/s]
-    body_angular_velocity: Vec3,
+    body_angular_velocity: DVec3,
 
     config: AirplaneConfig,
-    inertia_inv: Mat3,
+    inertia_inv: DMat3,
 }
 
 struct AeroState {
-    speed: f32,
-    dynamic_pressure: f32,
-    angle_of_attack: f32,
-    sideslip: f32,
+    speed: f64,
+    dynamic_pressure: f64,
+    angle_of_attack: f64,
+    sideslip: f64,
 }
 
 struct Deflections {
-    elevator: f32,
-    aileron: f32,
-    rudder: f32,
+    elevator: f64,
+    aileron: f64,
+    rudder: f64,
 }
 
 impl Deflections {
-    fn from_controls(controls: &Controls, limits: Vec3) -> Self {
+    fn from_controls(controls: &Controls, limits: DVec3) -> Self {
         Self {
-            elevator: -controls.pitch * limits.x,
-            aileron: controls.roll * limits.y,
-            rudder: controls.yaw * limits.z,
+            elevator: -controls.pitch as f64 * limits.x,
+            aileron: controls.roll as f64 * limits.y,
+            rudder: controls.yaw as f64 * limits.z,
         }
     }
 }
 
-const MAX_PHYSICS_STEP: f32 = 1.0 / 240.0;
+const MAX_PHYSICS_STEP: f64 = 1.0 / 240.0;
 
 impl Airplane {
     pub fn new(config: AirplaneConfig) -> Self {
@@ -75,7 +76,7 @@ impl Airplane {
         Self {
             pos: vec3(0.0, 40.0, 0.0),
             vel: vec3(55.0, 0.0, 0.0),
-            orientation: Quat::identity(),
+            orientation: DQuat::identity(),
             body_angular_velocity: vec3(0.0, 0.0, 0.0),
             inertia_inv,
             config,
@@ -83,33 +84,33 @@ impl Airplane {
     }
 
     /// Put the plane at `pos` facing `heading`
-    pub fn place(&mut self, pos: Vec3, heading: f32) {
+    pub fn place(&mut self, pos: DVec3, heading: f64) {
         self.pos = pos;
-        self.vel = Vec3::zeros();
-        self.body_angular_velocity = Vec3::zeros();
-        self.orientation = nalgebra_glm::quat_angle_axis(FRAC_PI_2 - heading, &Vec3::y())
+        self.vel = DVec3::zeros();
+        self.body_angular_velocity = DVec3::zeros();
+        self.orientation = nalgebra_glm::quat_angle_axis(FRAC_PI_2 - heading, &DVec3::y())
     }
 
     pub fn update(
         &mut self,
         controls: &Controls,
-        dt: f32,
-        ground: &impl Fn(f32, f32) -> (f32, Vec3),
+        dt: f64,
+        ground: &impl Fn(f64, f64) -> (f32, Vec3),
     ) {
         let steps = (dt / MAX_PHYSICS_STEP).ceil().max(1.0) as usize;
-        let h = dt / steps as f32;
+        let h = dt / steps as f64;
         for _ in 0..steps {
             self.step(controls, h, ground);
         }
     }
 
-    fn step(&mut self, controls: &Controls, dt: f32, ground: &impl Fn(f32, f32) -> (f32, Vec3)) {
+    fn step(&mut self, controls: &Controls, dt: f64, ground: &impl Fn(f64, f64) -> (f32, Vec3)) {
         let aero = self.calc_aero_state();
         let defl = Deflections::from_controls(controls, self.config.control_surface_limits);
 
-        let forces = self.calc_aero_forces(controls.throttle, &aero, &defl);
+        let forces = self.calc_aero_forces(controls.throttle as f64, &aero, &defl);
         let torque = self.calc_aero_moments(&aero, &defl);
-        let (ground_force, ground_torque) = self.calc_ground_forces(controls.brakes, ground);
+        let (ground_force, ground_torque) = self.calc_ground_forces(controls.brakes as f64, ground);
 
         self.integrate_translation(forces + ground_force, dt);
         self.integrate_rotation(torque + ground_torque, dt);
@@ -141,12 +142,12 @@ impl Airplane {
         }
     }
 
-    fn calc_aero_forces(&self, throttle: f32, aero: &AeroState, defl: &Deflections) -> Vec3 {
-        let forward = nalgebra_glm::quat_rotate_vec3(&self.orientation, &Vec3::new(1.0, 0.0, 0.0));
-        let up = nalgebra_glm::quat_rotate_vec3(&self.orientation, &Vec3::new(0.0, 1.0, 0.0));
-        let right = nalgebra_glm::quat_rotate_vec3(&self.orientation, &Vec3::new(0.0, 0.0, 1.0));
+    fn calc_aero_forces(&self, throttle: f64, aero: &AeroState, defl: &Deflections) -> DVec3 {
+        let forward = nalgebra_glm::quat_rotate_vec3(&self.orientation, &DVec3::new(1.0, 0.0, 0.0));
+        let up = nalgebra_glm::quat_rotate_vec3(&self.orientation, &DVec3::new(0.0, 1.0, 0.0));
+        let right = nalgebra_glm::quat_rotate_vec3(&self.orientation, &DVec3::new(0.0, 0.0, 1.0));
 
-        let mut force = Vec3::zeros();
+        let mut force = DVec3::zeros();
 
         // Thrust
         // TODO: Make this a better model
@@ -177,7 +178,7 @@ impl Airplane {
             let aspect_ratio = self.config.wingspan * self.config.wingspan / self.config.wing_area;
             let c_drag_attached = self.config.drag_coefficient_base
                 + (c_lift * c_lift)
-                    / (std::f32::consts::PI * aspect_ratio * self.config.oswald_efficiency);
+                    / (std::f64::consts::PI * aspect_ratio * self.config.oswald_efficiency);
             let c_drag_flat_plate = 2.0 * aero.angle_of_attack.sin().powi(2);
             let c_drag = c_drag_attached.max(c_drag_flat_plate);
             let drag_magnitude = aero.dynamic_pressure * self.config.wing_area * c_drag;
@@ -190,7 +191,7 @@ impl Airplane {
         force
     }
 
-    fn lift_coefficient(&self, alpha: f32) -> f32 {
+    fn lift_coefficient(&self, alpha: f64) -> f64 {
         let linear = self.config.zero_lift_coefficient + self.config.lift_slope * alpha;
 
         // aoa at which the linear curve hits its limit
@@ -200,7 +201,7 @@ impl Airplane {
             (self.config.min_cl - self.config.zero_lift_coefficient) / self.config.lift_slope;
 
         let flat_plate = (2.0 * alpha).sin(); // high aoa lift
-        let blend_width = 8.0_f32.to_radians();
+        let blend_width = 8.0_f64.to_radians();
 
         if alpha > alpha_stall_pos {
             let t = ((alpha - alpha_stall_pos) / blend_width).min(1.0);
@@ -215,9 +216,9 @@ impl Airplane {
         }
     }
 
-    fn calc_aero_moments(&self, aero: &AeroState, defl: &Deflections) -> Vec3 {
+    fn calc_aero_moments(&self, aero: &AeroState, defl: &Deflections) -> DVec3 {
         if aero.speed < 1.0 {
-            return Vec3::zeros();
+            return DVec3::zeros();
         }
 
         // Convert to the standard aero axes (x fwd, y right, z down)
@@ -250,28 +251,30 @@ impl Airplane {
 
     fn calc_ground_forces(
         &self,
-        brake_fraction: f32,
-        ground: &impl Fn(f32, f32) -> (f32, Vec3),
-    ) -> (Vec3, Vec3) {
+        brake_fraction: f64,
+        ground: &impl Fn(f64, f64) -> (f32, Vec3),
+    ) -> (DVec3, DVec3) {
         let weight = self.config.mass * 9.81;
 
         // Springs that hold the plane up with WHEEL_SAG of squash, with the weight shared between the wheels
         let wheels = CONTACTS // TODO: aero shouldn't depend on the mesh module!! Put this in config!!!!
             .iter()
             .filter(|c| matches!(c.kind, ContactKind::Wheel { .. }))
-            .count() as f32;
+            .count() as f64;
         let k_wheel = weight / (wheels * WHEEL_SAG);
         let c_wheel = WHEEL_DAMPING * 2.0 * (k_wheel * self.config.mass / wheels).sqrt();
 
         let omega = nalgebra_glm::quat_rotate_vec3(&self.orientation, &self.body_angular_velocity);
         let forward = nalgebra_glm::quat_rotate_vec3(&self.orientation, &vec3(1.0, 0.0, 0.0));
 
-        let mut force = Vec3::zeros();
-        let mut torque = Vec3::zeros(); // world space, about the center of grav
+        let mut force = DVec3::zeros();
+        let mut torque = DVec3::zeros(); // world space, about the center of grav
         for contact in &CONTACTS {
             let r = nalgebra_glm::quat_rotate_vec3(&self.orientation, &contact.pos);
             let center = self.pos + r;
             let (h, n) = ground(center.x, center.z);
+            let h = h as f64;
+            let n: DVec3 = n.cast();
 
             // How far the sphere is into the ground
             let depth = contact.radius - (center.y - h) * n.y;
@@ -333,13 +336,13 @@ impl Airplane {
         )
     }
 
-    fn integrate_translation(&mut self, forces: Vec3, dt: f32) {
+    fn integrate_translation(&mut self, forces: DVec3, dt: f64) {
         let accel = forces / self.config.mass;
         self.vel += accel * dt;
         self.pos += self.vel * dt;
     }
 
-    fn integrate_rotation(&mut self, torque: Vec3, dt: f32) {
+    fn integrate_rotation(&mut self, torque: DVec3, dt: f64) {
         let h = self.config.inertia * self.body_angular_velocity;
         let angular_accel = self.inertia_inv * (torque - self.body_angular_velocity.cross(&h)); // hey this looks like orbit stuff!
         self.body_angular_velocity += angular_accel * dt;
@@ -354,43 +357,43 @@ impl Airplane {
 
         let s = half_angle.sin();
 
-        let delta = Quat::new(half_angle.cos(), axis.x * s, axis.y * s, axis.z * s);
+        let delta = DQuat::new(half_angle.cos(), axis.x * s, axis.y * s, axis.z * s);
 
         self.orientation = (self.orientation * delta).normalize();
     }
 
-    pub fn model_matrix(&self) -> Mat4 {
-        let translation = nalgebra_glm::translation(&self.pos);
-        let rotation = nalgebra_glm::quat_to_mat4(&self.orientation);
-
-        translation * rotation
+    pub fn model_matrix(&self, origin: &FloatingOrigin) -> Mat4 {
+        origin.transform(
+            self.pos,
+            nalgebra_glm::quat_to_mat4(&self.orientation).cast::<f32>(),
+        )
     }
 
     /// Nose angle above the horizon [rad], + = nose up
-    pub fn pitch(&self) -> f32 {
+    pub fn pitch(&self) -> f64 {
         let forward = nalgebra_glm::quat_rotate_vec3(&self.orientation, &vec3(1.0, 0.0, 0.0));
         forward.y.clamp(-1.0, 1.0).asin()
     }
 
     /// Bank angle [rad], + = right wing down. Works inverted too
-    pub fn roll(&self) -> f32 {
+    pub fn roll(&self) -> f64 {
         let up = nalgebra_glm::quat_rotate_vec3(&self.orientation, &vec3(0.0, 1.0, 0.0));
         let right = nalgebra_glm::quat_rotate_vec3(&self.orientation, &vec3(0.0, 0.0, 1.0));
         (-right.y).atan2(up.y)
     }
 
     /// Compass heading [rad], 0 = north (-Z), clockwise, 0..2pi
-    pub fn heading(&self) -> f32 {
+    pub fn heading(&self) -> f64 {
         let forward = nalgebra_glm::quat_rotate_vec3(&self.orientation, &vec3(1.0, 0.0, 0.0));
         forward
             .x
             .atan2(-forward.z)
-            .rem_euclid(std::f32::consts::TAU)
+            .rem_euclid(std::f64::consts::TAU)
     }
 }
 
 /// Friction against sliding at `v`, up to `mu * normal_force`
-fn friction(v: Vec3, mu: f32, normal_force: f32) -> Vec3 {
+fn friction(v: DVec3, mu: f64, normal_force: f64) -> DVec3 {
     -v * (mu * normal_force / v.norm().max(SLIP_SPEED))
 }
 
@@ -398,29 +401,29 @@ fn friction(v: Vec3, mu: f32, normal_force: f32) -> Vec3 {
 mod tests {
     use super::*;
 
-    fn plane_at(local_vel: Vec3) -> Airplane {
+    fn plane_at(local_vel: DVec3) -> Airplane {
         let mut p = Airplane::new(AirplaneConfig::cessna172());
         p.vel = local_vel; // identity orientation, so body == world
         p
     }
 
-    fn moments(p: &Airplane, controls: &Controls) -> Vec3 {
+    fn moments(p: &Airplane, controls: &Controls) -> DVec3 {
         let aero = p.calc_aero_state();
         let defl = Deflections::from_controls(controls, p.config.control_surface_limits);
         p.calc_aero_moments(&aero, &defl)
     }
 
-    fn forces(p: &Airplane, controls: &Controls) -> Vec3 {
+    fn forces(p: &Airplane, controls: &Controls) -> DVec3 {
         let aero = p.calc_aero_state();
         let defl = Deflections::from_controls(controls, p.config.control_surface_limits);
-        p.calc_aero_forces(controls.throttle, &aero, &defl)
+        p.calc_aero_forces(controls.throttle as f64, &aero, &defl)
     }
 
     #[test]
     fn positive_x_rotation_rolls_right() {
         let mut p = plane_at(vec3(55.0, 0.0, 0.0));
         p.body_angular_velocity = vec3(1.0, 0.0, 0.0);
-        p.integrate_rotation(Vec3::zeros(), 0.1);
+        p.integrate_rotation(DVec3::zeros(), 0.1);
         let right = nalgebra_glm::quat_rotate_vec3(&p.orientation, &vec3(0.0, 0.0, 1.0));
         assert!(right.y < 0.0, "right wing should drop");
     }
@@ -429,7 +432,7 @@ mod tests {
     fn positive_z_rotation_pitches_up() {
         let mut p = plane_at(vec3(55.0, 0.0, 0.0));
         p.body_angular_velocity = vec3(0.0, 0.0, 1.0);
-        p.integrate_rotation(Vec3::zeros(), 0.1);
+        p.integrate_rotation(DVec3::zeros(), 0.1);
         let fwd = nalgebra_glm::quat_rotate_vec3(&p.orientation, &vec3(1.0, 0.0, 0.0));
         assert!(fwd.y > 0.0, "nose should rise");
     }
@@ -457,7 +460,7 @@ mod tests {
         let m = moments(&p, &Controls::new());
         assert!(m.x < 0.0 && m.y < 0.0, "roll/yaw rates should be opposed");
         // pitch includes cm_0, so compare against zero-rate case
-        p.body_angular_velocity = Vec3::zeros();
+        p.body_angular_velocity = DVec3::zeros();
         let m0 = moments(&p, &Controls::new());
         assert!(m.z < m0.z, "pitch rate should be opposed");
     }

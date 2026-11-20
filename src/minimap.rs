@@ -1,5 +1,5 @@
 use apricot::{
-    camera::{Camera, ProjectionKind},
+    camera::{floating_origin::FloatingOrigin, Camera, ProjectionKind},
     error::Error,
     model_set::ModelSet,
     opengl::DrawOptions,
@@ -42,12 +42,14 @@ impl Minimap {
         map: &Heightmap,
         chunks: &ModelSet<ChunkCoord>,
         old_light: &DirectionalLight,
+        origin: &FloatingOrigin,
     ) {
         let h = plane.heading();
-        let forward = vec3(h.sin(), 0.0, -h.cos());
+        let pos = origin.relative(plane.pos);
+        let forward = vec3(h.sin(), 0.0, -h.cos()).cast();
 
         let top = map.max_height + 100.0;
-        let eye = vec3(plane.pos.x, top, plane.pos.z);
+        let eye = vec3(pos.x, top, pos.z);
         let camera = Camera::new(
             eye,
             eye - vec3(0.0, 1.0, 0.0),

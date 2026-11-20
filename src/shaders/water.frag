@@ -2,6 +2,7 @@ uniform vec3 u_sun_dir;
 uniform vec3 u_camera_pos;
 uniform float u_time;
 uniform int u_minimap; // 1 while drawing the minimap, no air between the camera and the ground
+uniform vec2 u_origin;
 
 in vec3 v_world_pos;
 out vec4 color;
@@ -68,7 +69,7 @@ void main() {
     vec3 v = view / dist;
 
     float filtered;
-    vec2 s = wave_slope(v_world_pos.xz, u_time, filtered);
+    vec2 s = wave_slope(v_world_pos.xz + u_origin, u_time, filtered);
     vec3 n = normalize(vec3(-s.x, 1.0, -s.y));
 
     // Water fresnel

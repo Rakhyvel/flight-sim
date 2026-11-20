@@ -1,5 +1,5 @@
 use apricot::terrain::{surface_height, surface_normal};
-use nalgebra_glm::{smoothstep, vec2, vec3, Vec2, Vec3};
+use nalgebra_glm::{smoothstep, vec2, vec3, DVec2, Vec2, Vec3};
 use std::{fs::File, io::BufReader};
 use tiff::{
     decoder::{Decoder, DecodingResult, Limits},
@@ -18,24 +18,24 @@ pub struct GeoRef {
     dlon: f64,
     dlat: f64,
     /// Meters per sample, east and south
-    spacing_x: f64,
-    spacing_z: f64,
+    pub spacing_x: f64,
+    pub spacing_z: f64,
 }
 
 impl GeoRef {
     /// World (x, z) [m] of a latitude and longitude [deg]
-    pub fn to_world(&self, lat: f64, lon: f64) -> Vec2 {
+    pub fn to_world(&self, lat: f64, lon: f64) -> DVec2 {
         vec2(
-            ((lon - self.lon0) / self.dlon * self.spacing_x) as f32,
-            ((self.lat0 - lat) / self.dlat * self.spacing_z) as f32,
+            (lon - self.lon0) / self.dlon * self.spacing_x,
+            (self.lat0 - lat) / self.dlat * self.spacing_z,
         )
     }
 
     /// Latitude and longitude [deg] of world (x, z) [m]
-    pub fn to_lat_lon(&self, x: f32, z: f32) -> (f64, f64) {
+    pub fn to_lat_lon(&self, x: f64, z: f64) -> (f64, f64) {
         (
-            self.lat0 - z as f64 / self.spacing_z * self.dlat,
-            self.lon0 + x as f64 / self.spacing_x * self.dlon,
+            self.lat0 - z / self.spacing_z * self.dlat,
+            self.lon0 + x / self.spacing_x * self.dlon,
         )
     }
 }
@@ -158,15 +158,20 @@ impl Heightmap {
     }
 
     /// Smooth ground height at (x, z)
-    pub fn ground(&self, x: f32, z: f32) -> (f32, Vec3) {
-        let height = |cx: f32, cz: f32| self.sample(cx as i32, cz as i32);
-        let (cx, cz) = (x / self.spacing_x, z / self.spacing_z);
-        let h = surface_height(height, cx, cz);
+    pub fn ground(&self, x: f64, z: f64) -> (f32, Vec3) {
+        // Which cell we're in
+        let (cx, cz) = (x / self.geo.spacing_x, z / self.geo.spacing_z);
+        let (x0, z0) = (cx.floor(), cz.floor());
+        let (ix, iz) = (x0 as i32, z0 as i32);
+        let (fx, fz) = ((cx - x0) as f32, (cz - z0) as f32);
+
+        let height = |lx: f32, lz: f32| self.sample(ix + lx as i32, iz + lz as i32);
+        let h = surface_height(height, fx, fz);
         if h <= 0.0 {
             return (0.0, Vec3::y());
         }
 
-        let n = surface_normal(height, cx, cz);
+        let n = surface_normal(height, fx, fz);
         (
             h,
             // Conver the normal's cell units to meters
@@ -238,10 +243,10 @@ impl Heightmap {
     }
 
     /// Whether (lat, long) [deg] is on the map, at least `inset` [m] from the edge
-    pub fn contains_lat_lon(&self, lat: f64, lon: f64, inset: f32) -> bool {
+    pub fn contains_lat_lon(&self, lat: f64, lon: f64, inset: f64) -> bool {
         let p = self.geo.to_world(lat, lon);
-        let max_x = (self.width - 1) as f32 * self.spacing_x;
-        let max_z = (self.depth - 1) as f32 * self.spacing_z;
+        let max_x = (self.width - 1) as f64 * self.geo.spacing_x;
+        let max_z = (self.depth - 1) as f64 * self.geo.spacing_z;
         p.x >= inset && p.y >= inset && p.x <= max_x - inset && p.y <= max_z - inset
     }
 }

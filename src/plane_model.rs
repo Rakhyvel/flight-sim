@@ -2,7 +2,7 @@
 ///! TODO: The mesh should be taken from a .obj, and idk about the contact points but probably a toml or something per plane.
 ///!       Maybe the toml specifies the .obj, the textures, and the contact points? And the engine config? And the aero config?
 use apricot::mesh::{MeshData, Vertex};
-use nalgebra_glm::{vec2, vec3, Vec3};
+use nalgebra_glm::{vec2, vec3, DVec3, Vec3};
 
 /// Where the propeller hub sits, in body space [m]
 pub const PROP_HUB: Vec3 = Vec3::new(2.42, -0.02, 0.0);
@@ -23,23 +23,23 @@ pub enum ContactKind {
 #[derive(Clone, Copy)]
 pub struct ContactPoint {
     /// Center of the sphere [m]
-    pub pos: Vec3,
+    pub pos: DVec3,
     /// Radius of the sphere
-    pub radius: f32,
+    pub radius: f64,
     pub kind: ContactKind,
 }
 
-const fn wheel(x: f32, y: f32, z: f32, radius: f32, brakes: bool) -> ContactPoint {
+const fn wheel(x: f64, y: f64, z: f64, radius: f64, brakes: bool) -> ContactPoint {
     ContactPoint {
-        pos: Vec3::new(x, y, z),
+        pos: DVec3::new(x, y, z),
         radius,
         kind: ContactKind::Wheel { brakes },
     }
 }
 
-const fn airframe(x: f32, y: f32, z: f32) -> ContactPoint {
+const fn airframe(x: f64, y: f64, z: f64) -> ContactPoint {
     ContactPoint {
-        pos: Vec3::new(x, y, z),
+        pos: DVec3::new(x, y, z),
         radius: 0.1,
         kind: ContactKind::Airframe,
     }

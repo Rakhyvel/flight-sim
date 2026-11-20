@@ -1,12 +1,13 @@
 use std::error::Error;
 
 use apricot::{
+    camera::floating_origin::FloatingOrigin,
     model_set::{Model, ModelSet},
     opengl::DrawOptions,
     render::{assets::MeshId, lighting::ShadowPass, RenderContext},
     terrain::chunks::{ChunkCoord, ChunkGrid},
 };
-use nalgebra_glm::{vec3, vec4, Mat4, Vec2, Vec3};
+use nalgebra_glm::{vec3, vec4, DVec2, DVec3, Mat4, Vec2, Vec3};
 
 use crate::{
     airport::{self, Runway},
@@ -18,14 +19,21 @@ use crate::{
 const CHUNK_CELLS: u32 = 64;
 const LOAD_RADIUS: i32 = 32;
 /// How far a runway has to be from the edge of the map to be used [m]
-const EDGE_INSET: f32 = 200.0;
+const EDGE_INSET: f64 = 200.0;
+
+/// The origin snaps to multiples of this [m] so it's a whole number and exact even in f32
+const ORIGIN_SNAP: f64 = 1024.0;
+const RECENTER_DISTANCE: f64 = 2048.0;
 
 pub struct World {
     pub map: Heightmap,
     pub runways: Vec<Runway>,
-    runway_meshes: Vec<(MeshId, MeshId)>,
+    /// Where each runway's meshes are anchored, and its asphalt and markings
+    runway_meshes: Vec<(DVec3, MeshId, MeshId)>,
     chunk_grid: ChunkGrid,
     pub chunks: ModelSet<ChunkCoord>,
+    /// Everything is drawn relative to this
+    pub origin: FloatingOrigin,
 }
 
 impl World {
@@ -36,7 +44,7 @@ impl World {
                 && map.contains_lat_lon(he.0, he.1, EDGE_INSET)
         })?;
 
-        let strips: Vec<_> = runways
+        let strips: Vec<(DVec2, DVec2, f32)> = runways
             .iter()
             .step_by(2)
             .map(|r| {
@@ -48,7 +56,7 @@ impl World {
             })
             .collect();
         for &(a, b, width) in &strips {
-            map.flatten_runway(a, b, width);
+            map.flatten_runway(a.cast(), b.cast(), width);
         }
         let runway_meshes = strips
             .iter()
@@ -56,6 +64,7 @@ impl World {
                 let (asphalt, marks) =
                     runway_model::runway_meshes(a, b, width, |x, z| map.ground(x, z));
                 (
+                    DVec3::new(a.x, 0.0, a.y),
                     renderer.add_mesh_data(asphalt, None),
                     renderer.add_mesh_data(marks, None),
                 )
@@ -68,11 +77,12 @@ impl World {
             runway_meshes,
             chunk_grid: ChunkGrid::new(CHUNK_CELLS),
             chunks: ModelSet::new(),
+            origin: FloatingOrigin::default(),
         })
     }
 
     /// Height and normal of the ground at world (x, z)
-    pub fn ground(&self, x: f32, z: f32) -> (f32, Vec3) {
+    pub fn ground(&self, x: f64, z: f64) -> (f32, Vec3) {
         self.map.ground(x, z)
     }
 
@@ -81,19 +91,48 @@ impl World {
     }
 
     /// Where to put a plane on `runway`
-    pub fn spawn_point(&self, runway: &Runway) -> (Vec3, f32) {
+    pub fn spawn_point(&self, runway: &Runway) -> (DVec3, f64) {
         let a = self.map.geo.to_world(runway.start.0, runway.start.1);
         let b = self.map.geo.to_world(runway.end.0, runway.end.1);
         let dir = (b - a).normalize();
         let spot = a + dir * 30.0;
         let (ground, _) = self.ground(spot.x, spot.y);
-        (vec3(spot.x, ground, spot.y), dir.x.atan2(-dir.y))
+        (vec3(spot.x, ground as f64, spot.y), dir.x.atan2(-dir.y))
+    }
+
+    pub fn recenter(&mut self, pos: DVec3) {
+        let d = pos - self.origin.pos;
+        if d.x.abs() < RECENTER_DISTANCE && d.z.abs() < RECENTER_DISTANCE {
+            return;
+        }
+        let snap = |v: f64| (v / ORIGIN_SNAP).round() * ORIGIN_SNAP;
+        self.origin.pos = DVec3::new(snap(pos.x), 0.0, snap(pos.z));
+
+        let moved: Vec<_> = self
+            .chunks
+            .iter()
+            .map(|(k, _)| (k, self.chunk_transform(k)))
+            .collect();
+        for (k, transform) in moved {
+            self.chunks.set_transform(k, transform);
+        }
+    }
+
+    fn chunk_transform(&self, chunk: ChunkCoord) -> Mat4 {
+        let o = self.chunk_grid.origin(chunk); // in cells, whole numbers
+        let corner = DVec3::new(
+            o.x as f64 * self.map.geo.spacing_x,
+            0.0,
+            o.z as f64 * self.map.geo.spacing_z,
+        );
+        let scale = nalgebra_glm::scaling(&vec3(self.map.spacing_x, 1.0, self.map.spacing_z));
+        self.origin.transform(corner, scale)
     }
 
     /// Stream terrain chunks around `pos`, building at most `max_loads` of them
-    pub fn update(&mut self, renderer: &RenderContext, pos: Vec3, max_loads: usize) {
-        let (sx, sz) = (self.map.spacing_x, self.map.spacing_z);
-        let cell_pos = vec3(pos.x / sx, 0.0, pos.z / sz);
+    pub fn update(&mut self, renderer: &RenderContext, pos: DVec3, max_loads: usize) {
+        let (sx, sz) = (self.map.geo.spacing_x, self.map.geo.spacing_z);
+        let cell_pos: Vec3 = vec3((pos.x / sx) as f32, 0.0, (pos.z / sz) as f32);
 
         let (w, d) = self.map.size();
         let max_cx = (w as u32).div_ceil(CHUNK_CELLS) as i32;
@@ -134,10 +173,7 @@ impl World {
                 .mesh_smooth(chunk, |x, z| map.sample(x as i32, z as i32));
             let mesh_id = renderer.add_mesh_data(mesh, None);
 
-            let o = self.chunk_grid.origin(chunk);
-            let origin = vec3(o.x * sx, 0.0, o.z * sz);
-            let transform =
-                nalgebra_glm::scale(&nalgebra_glm::translation(&origin), &vec3(sx, 1.0, sz));
+            let transform = self.chunk_transform(chunk);
 
             let pixels = terrain_color::chunk_texture(map, &self.chunk_grid, chunk);
             let texture = renderer.create_texture_rgba(CHUNK_CELLS, CHUNK_CELLS, &pixels);
@@ -148,7 +184,7 @@ impl World {
         }
     }
 
-    pub fn draw_shadows(&self, pass: &mut ShadowPass) {
+    pub fn draw_shadows(&self, pass: &ShadowPass) {
         self.chunks.draw_shadows(pass);
     }
 
@@ -170,18 +206,19 @@ impl World {
             ..Default::default()
         };
         let white = renderer.builtins.white_texture;
-        for &(surface, marks) in &self.runway_meshes {
+        for &(anchor, surface, marks) in &self.runway_meshes {
+            let model = self.origin.transform(anchor, Mat4::identity());
             renderer.draw_mesh_textured_with(
                 surface,
                 white,
-                Mat4::identity(),
+                model,
                 vec4(0.33, 0.33, 0.34, 1.0),
                 &asphalt,
             );
             renderer.draw_mesh_textured_with(
                 marks,
                 white,
-                Mat4::identity(),
+                model,
                 vec4(0.85, 0.85, 0.82, 1.0),
                 &paint,
             );

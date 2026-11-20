@@ -99,10 +99,10 @@ struct FlightSim {
     plane_mesh: MeshId,
     plane_trim_mesh: MeshId,
     plane_prop_mesh: MeshId,
-    prop_angle: f32, // [rad]
-    prop_rps: f32,   // displayed revolutions per second
+    prop_angle: f64, // [rad]
+    prop_rps: f64,   // displayed revolutions per second
 
-    engine_rpm: f32,
+    engine_rpm: f64,
     engine_sound: Option<SynthStream<EngineSound>>,
 
     plane: Airplane,
@@ -154,7 +154,7 @@ impl FlightSim {
         let regions = load_regions("assets/regions.toml");
         let region = regions
             .iter()
-            .find(|r| r.name == "Denver")
+            .find(|r| r.name == "Maui")
             .expect("no region");
         let world = World::load(renderer, region).expect("couldnt load region");
 
@@ -175,9 +175,10 @@ impl FlightSim {
             controls: Controls::new(),
         };
 
-        let runway = sim.world.runway("KBJC 03").expect("no runway");
+        let runway = sim.world.runway("PHOG 02").expect("no runway");
         let (spot, heading) = sim.world.spawn_point(runway);
         sim.plane.place(spot + vec3(0.0, 1.5, 0.0), heading);
+        sim.world.recenter(sim.plane.pos);
         sim.world.update(renderer, sim.plane.pos, usize::MAX);
 
         Ok(sim)
@@ -213,8 +214,8 @@ impl FlightSim {
             renderer,
             ai_center,
             r,
-            self.plane.pitch(),
-            self.plane.roll(),
+            self.plane.pitch() as f32,
+            self.plane.roll() as f32,
         );
 
         let compass = Rectangle::new(
@@ -223,7 +224,7 @@ impl FlightSim {
             2.0 * r,
             compass_h,
         );
-        hud::draw_compass(renderer, compass, self.plane.heading().to_degrees());
+        hud::draw_compass(renderer, compass, self.plane.heading().to_degrees() as f32);
     }
 
     /// Draw altitude, speed and throttle
@@ -282,7 +283,7 @@ impl FlightSim {
             bar_w,
             inner_h,
         );
-        hud::draw_vertical_bar(renderer, bar, self.controls.throttle);
+        hud::draw_vertical_bar(renderer, bar, self.controls.throttle as f32);
     }
 
     fn draw_minimap_panel(&self, renderer: &RenderContext, sh: f32) {
@@ -296,7 +297,7 @@ impl FlightSim {
             r,
             self.minimap.minimap.texture,
             MINIMAP_PX as f32,
-            self.plane.heading(),
+            self.plane.heading() as f32,
         );
     }
 }
@@ -309,17 +310,19 @@ impl Scene for FlightSim {
 
         self.controls.update_input(&app.input, app.dt.as_secs_f32());
         self.plane
-            .update(&self.controls, app.dt.as_secs_f32(), &|x, z| {
+            .update(&self.controls, app.dt.as_secs_f64(), &|x, z| {
                 self.world.ground(x, z)
             });
+        self.world.recenter(self.plane.pos);
         self.world
             .update(&app.renderer, self.plane.pos, LOADS_PER_FRAME);
 
-        let dt = app.dt.as_secs_f32();
+        let dt = app.dt.as_secs_f64();
         // For fixed speed props
         // TODO: Configurable?!
         let target_rpm =
-            (700.0 + self.controls.throttle * 1600.0 + self.plane.vel.norm() * 6.0).min(2800.0);
+            (700.0 + self.controls.throttle as f64 * 1600.0 + self.plane.vel.norm() * 6.0)
+                .min(2800.0);
         self.engine_rpm += (target_rpm - self.engine_rpm) * (1.5 * dt).min(1.0);
 
         let (rpm, throttle, airspeed) = (
@@ -329,9 +332,9 @@ impl Scene for FlightSim {
         );
         if let Some(sound) = &mut self.engine_sound {
             sound.with(|e| {
-                e.rpm = rpm;
-                e.throttle = throttle;
-                e.airspeed = airspeed;
+                e.rpm = rpm as f32;
+                e.throttle = throttle as f32;
+                e.airspeed = airspeed as f32;
             });
         }
 
@@ -339,7 +342,7 @@ impl Scene for FlightSim {
         // TODO: Take this from the engine model, don't do this on the front end!
         self.prop_rps = self.engine_rpm / 2700.0 * 7.5;
         self.prop_angle =
-            (self.prop_angle + self.prop_rps * std::f32::consts::TAU * dt) % std::f32::consts::TAU;
+            (self.prop_angle + self.prop_rps * std::f64::consts::TAU * dt) % std::f64::consts::TAU;
 
         let forward = nalgebra_glm::quat_rotate_vec3(&self.plane.orientation, &vec3(1.0, 0.0, 0.0));
         let up = nalgebra_glm::quat_rotate_vec3(&self.plane.orientation, &vec3(0.0, 1.0, 0.0));
@@ -356,16 +359,18 @@ impl Scene for FlightSim {
         let chase_dir = (forward * 0.8 + vel_dir * 0.2).normalize();
 
         // Orbit around the plane
-        let max_pan = std::f32::consts::PI * 0.5; // TODO: Could be a setting?
-        let view_dir = nalgebra_glm::rotate_vec3(&chase_dir, -self.controls.pan * max_pan, &up);
+        let max_pan = std::f64::consts::PI * 0.5; // TODO: Could be a setting?
+        let view_dir =
+            nalgebra_glm::rotate_vec3(&chase_dir, -self.controls.pan as f64 * max_pan, &up);
 
         // Position camera behind and slightly above the blended vector
-        let cam_pos = self.plane.pos - view_dir * 25.0 + up * 6.0;
+        let plane_pos = self.plane.pos - self.world.origin.pos;
+        let cam_pos = plane_pos - view_dir * 25.0 + up * 6.0;
 
         let camera = Camera::new(
-            cam_pos,
-            self.plane.pos + view_dir * 10.0, // Look ahead of the plane
-            up,
+            cam_pos.cast(),
+            (plane_pos + view_dir * 10.0).cast(), // Look ahead of the plane
+            up.cast(),
             ProjectionKind::Perspective {
                 fov_rad: std::f32::consts::FRAC_PI_4,
                 near: 1.0,
@@ -379,11 +384,21 @@ impl Scene for FlightSim {
 
     fn render(&mut self, app: &App) {
         let renderer = &app.renderer;
+
         let sea_size = 2.0 * CAMERA_FAR;
+        let plane_pos = self.world.origin.relative(self.plane.pos);
         let sea: Mat4 = nalgebra_glm::scale(
-            &nalgebra_glm::translation(&vec3(self.plane.pos.x, 0.0, self.plane.pos.z)),
+            &nalgebra_glm::translation(&vec3(plane_pos.x, 0.0, plane_pos.z)),
             &vec3(sea_size, 1.0, sea_size),
         );
+
+        let origin = vec2(
+            self.world.origin.pos.x as f32,
+            self.world.origin.pos.z as f32,
+        );
+        for program in [renderer.builtins.program_3d, self.water_program] {
+            renderer.uniform(program, "u_origin").set_vec2(&origin);
+        }
 
         self.minimap.render(
             renderer,
@@ -392,20 +407,21 @@ impl Scene for FlightSim {
             &self.world.map,
             &self.world.chunks,
             &self.light,
+            &self.world.origin,
         );
 
-        let plane_model = self.plane.model_matrix();
+        let plane_model = self.plane.model_matrix(&self.world.origin);
 
         let prop_model = nalgebra_glm::rotate_x(
             &nalgebra_glm::translate(&plane_model, &plane_model::PROP_HUB),
-            self.prop_angle,
+            self.prop_angle as f32,
         );
 
         renderer.shadow_pass(&mut self.light, |pass| {
             pass.draw(self.plane_mesh, plane_model);
             pass.draw(self.plane_trim_mesh, plane_model);
             pass.draw(self.plane_prop_mesh, prop_model);
-            // self.world.draw_shadows(&mut pass);
+            self.world.draw_shadows(pass);
         });
 
         renderer.clear(vec4(0.6, 0.8, 0.95, 1.0));

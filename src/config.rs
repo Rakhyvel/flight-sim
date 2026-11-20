@@ -1,37 +1,37 @@
-use nalgebra_glm::{vec3, Mat3, Vec3};
+use nalgebra_glm::{vec3, DMat3, DVec3};
 
 #[derive(Clone, Copy)]
 pub struct AirplaneConfig {
     /// Mass of the airplane [kg]
-    pub mass: f32,
+    pub mass: f64,
     /// Area of the wings [m^2]
-    pub wing_area: f32,
+    pub wing_area: f64,
     /// Wingspan [m]
-    pub wingspan: f32,
+    pub wingspan: f64,
     /// Chord thats a bit rude [m]
-    pub mean_chord: f32,
+    pub mean_chord: f64,
     /// Max thrust of the engine [N]
-    pub max_thrust: f32,
+    pub max_thrust: f64,
     /// Rotational inertia tensor [kg*m^2]
-    pub inertia: Mat3,
+    pub inertia: DMat3,
 
     /// Lift coefficient slope [1/rad]
-    pub lift_slope: f32,
+    pub lift_slope: f64,
     /// Lift coeff at 0 aoa
-    pub zero_lift_coefficient: f32,
+    pub zero_lift_coefficient: f64,
     /// Max positive lift coeff
-    pub max_cl: f32,
+    pub max_cl: f64,
     /// Max negative lift coeff
-    pub min_cl: f32,
+    pub min_cl: f64,
     /// Parasite drag
-    pub drag_coefficient_base: f32,
+    pub drag_coefficient_base: f64,
     /// Oswald efficiency factor for induced drag
-    pub oswald_efficiency: f32,
+    pub oswald_efficiency: f64,
     /// Side force per rad of sideslip
-    pub cy_beta: f32,
+    pub cy_beta: f64,
 
     /// Control surface limits [rad] [elevator, aileron, rudder]
-    pub control_surface_limits: Vec3,
+    pub control_surface_limits: DVec3,
 
     /// Stability derivatives (standard aero sign conventions)
     pub derivs: StabilityDerivatives,
@@ -40,22 +40,22 @@ pub struct AirplaneConfig {
 #[derive(Clone, Copy)]
 pub struct StabilityDerivatives {
     // Lift
-    pub c_lift_elevator: f32,
+    pub c_lift_elevator: f64,
     // Side force
-    pub c_side_rudder: f32,
+    pub c_side_rudder: f64,
     // Pitch
-    pub cm_0: f32,
-    pub cm_alpha: f32,
-    pub cm_q: f32,
-    pub cm_elevator: f32,
+    pub cm_0: f64,
+    pub cm_alpha: f64,
+    pub cm_q: f64,
+    pub cm_elevator: f64,
     // Roll
-    pub cl_beta: f32,
-    pub cl_p: f32,
-    pub cl_aileron: f32,
+    pub cl_beta: f64,
+    pub cl_p: f64,
+    pub cl_aileron: f64,
     // Yaw
-    pub cn_beta: f32,
-    pub cn_r: f32,
-    pub cn_rudder: f32,
+    pub cn_beta: f64,
+    pub cn_r: f64,
+    pub cn_rudder: f64,
 }
 
 impl AirplaneConfig {
@@ -67,7 +67,7 @@ impl AirplaneConfig {
             wingspan: 11.0,
             mean_chord: 1.49,
             max_thrust: 2600.0,
-            inertia: Mat3::from_diagonal(&vec3(1285.0, 2667.0, 1825.0)),
+            inertia: DMat3::from_diagonal(&vec3(1285.0, 2667.0, 1825.0)),
 
             lift_slope: 5.0,
             zero_lift_coefficient: 0.2,
@@ -78,9 +78,9 @@ impl AirplaneConfig {
             cy_beta: -0.31,
 
             control_surface_limits: vec3(
-                25.0_f32.to_radians(),
-                18.0_f32.to_radians(),
-                16.0_f32.to_radians(),
+                25.0_f64.to_radians(),
+                18.0_f64.to_radians(),
+                16.0_f64.to_radians(),
             ),
 
             derivs: StabilityDerivatives {
@@ -110,7 +110,7 @@ impl AirplaneConfig {
             max_thrust: 1700.0,
 
             // Approximate inertia tensor [kg*m^2]
-            inertia: Mat3::from_diagonal(&vec3(
+            inertia: DMat3::from_diagonal(&vec3(
                 650.0,  // Ixx: roll
                 950.0,  // Iyy: pitch
                 1300.0, // Izz: yaw
@@ -127,9 +127,9 @@ impl AirplaneConfig {
 
             // [elevator, aileron, rudder]
             control_surface_limits: vec3(
-                25.0_f32.to_radians(),
-                15.0_f32.to_radians(),
-                25.0_f32.to_radians(),
+                25.0_f64.to_radians(),
+                15.0_f64.to_radians(),
+                25.0_f64.to_radians(),
             ),
 
             derivs: StabilityDerivatives {
@@ -168,7 +168,7 @@ impl AirplaneConfig {
             max_thrust: 52_000.0, // Combined twin turboprops (Pratt & Whitney PW150A equivalents)
 
             // Rotational inertia tensor [kg*m^2] (much larger body, higher resistance to rotation)
-            inertia: Mat3::from_diagonal(&vec3(
+            inertia: DMat3::from_diagonal(&vec3(
                 45_000.0,  // Ixx: roll
                 120_000.0, // Iyy: pitch
                 150_000.0, // Izz: yaw
@@ -185,9 +185,9 @@ impl AirplaneConfig {
 
             // Control surface limits [rad] [elevator, aileron, rudder]
             control_surface_limits: vec3(
-                20.0_f32.to_radians(), // Smaller deflection angles for high-speed control
-                15.0_f32.to_radians(),
-                22.0_f32.to_radians(),
+                20.0_f64.to_radians(), // Smaller deflection angles for high-speed control
+                15.0_f64.to_radians(),
+                22.0_f64.to_radians(),
             ),
 
             derivs: StabilityDerivatives {
