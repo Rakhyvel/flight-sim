@@ -1,3 +1,5 @@
+use std::f32::consts::FRAC_PI_2;
+
 use nalgebra_glm::{vec3, Mat3, Mat4, Quat, Vec3};
 
 use crate::{
@@ -78,6 +80,14 @@ impl Airplane {
             inertia_inv,
             config,
         }
+    }
+
+    /// Put the plane at `pos` facing `heading`
+    pub fn place(&mut self, pos: Vec3, heading: f32) {
+        self.pos = pos;
+        self.vel = Vec3::zeros();
+        self.body_angular_velocity = Vec3::zeros();
+        self.orientation = nalgebra_glm::quat_angle_axis(FRAC_PI_2 - heading, &Vec3::y())
     }
 
     pub fn update(
