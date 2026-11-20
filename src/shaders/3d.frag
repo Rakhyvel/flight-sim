@@ -11,7 +11,7 @@ in vec3 v_world_pos;
 
 out vec4 color;
 
-const float CAMERA_FAR = 50000.0; // keep in sync with main.rs
+const float CAMERA_FAR = 60000.0; // keep in sync with main.rs
 
 // How much air lies between the camera and a point `dist` away
 float air_distance(float dist) {

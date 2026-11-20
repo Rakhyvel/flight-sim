@@ -6,7 +6,7 @@ uniform int u_minimap; // 1 while drawing the minimap, no air between the camera
 in vec3 v_world_pos;
 out vec4 color;
 
-const float CAMERA_FAR = 50000.0; // keep up to date!
+const float CAMERA_FAR = 60000.0; // keep up to date!
 const vec3 WATER_BODY = vec3(0.004, 0.022, 0.035); // deep ocean, linear
 
 const vec2 WIND_DIR = vec2(0.944, 0.330);

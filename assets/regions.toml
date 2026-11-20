@@ -1,0 +1,7 @@
+[[regions]]
+name = "Maui"
+tiff = "maui.tif"
+
+[[regions]]
+name = "Denver"
+tiff = "denver.tif"
