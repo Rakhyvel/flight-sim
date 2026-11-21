@@ -169,7 +169,7 @@ impl FlightSim {
         let regions = load_regions("assets/regions.toml");
         let region = regions
             .iter()
-            .find(|r| r.name == "Denver")
+            .find(|r| r.name == "Tucson")
             .expect("no region");
         let world = World::load(renderer, region).expect("couldnt load region");
 
@@ -193,12 +193,13 @@ impl FlightSim {
             route: Route::new(vec![]),
         };
 
-        let mut waypoints = vec![sim.world.waypoint("KDEN").cloned().expect("no airport")];
-        let runway = sim.world.runway("KBJC 03").expect("no runway");
-        waypoints.extend(sim.world.approach(runway));
+        let mut waypoints = vec![];
+        let depart_runway = sim.world.runway("KTUS 04").expect("no runway");
+        let arrive_runway = sim.world.runway("KPHX 08").expect("no runway");
+        waypoints.extend(sim.world.approach(arrive_runway));
         sim.route = Route::new(waypoints);
 
-        let (spot, heading) = sim.world.spawn_point(runway);
+        let (spot, heading) = sim.world.spawn_point(depart_runway);
         sim.plane.place(spot + vec3(0.0, 1.5, 0.0), heading);
         sim.world.recenter(sim.plane.pos);
         sim.world.update(renderer, sim.plane.pos, usize::MAX);

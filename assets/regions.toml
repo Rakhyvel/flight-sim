@@ -9,3 +9,7 @@ tiff = "denver.tif"
 [[regions]]
 name = "Seattle"
 tiff = "seattle.tif"
+
+[[regions]]
+name = "Tucson"
+tiff = "tucson.tif"
