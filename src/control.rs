@@ -96,9 +96,9 @@ impl Controls {
         self.brakes += (self.target_brakes - self.brakes) * smoothing.min(1.0);
 
         if let Some(js) = input.joystick() {
-            let stick_roll = deadzone(js.axis(0), 0.1);
-            let stick_pitch = deadzone(js.axis(1), 0.1);
-            let stick_yaw = deadzone(js.axis(2), 0.1);
+            let stick_roll = js.axis(0);
+            let stick_pitch = js.axis(1);
+            let stick_yaw = js.axis(2);
 
             // Add on the stick input
             self.pitch = stick_pitch;
@@ -106,14 +106,5 @@ impl Controls {
             self.yaw = -stick_yaw;
             self.throttle = (1.0 - js.axis(3)) * 0.5;
         }
-    }
-}
-
-/// Zero out small stick noise near center, then rescale so it still reaches +-1
-fn deadzone(value: f32, size: f32) -> f32 {
-    if value.abs() < size {
-        0.0
-    } else {
-        value.signum() * (value.abs() - size) / (1.0 - size)
     }
 }
