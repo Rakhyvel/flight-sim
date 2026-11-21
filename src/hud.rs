@@ -20,6 +20,8 @@ const DIM: Vec4 = Vec4::new(1.0, 1.0, 1.0, 0.5);
 const ACCENT: Vec4 = Vec4::new(1.0, 0.75, 0.2, 1.0);
 const SKY: Vec4 = Vec4::new(0.25, 0.5, 0.9, 0.35);
 const GROUND: Vec4 = Vec4::new(0.6, 0.4, 0.2, 0.35);
+const WAYPOINT: Vec4 = Vec4::new(0.9, 0.4, 1.1, 1.0); // we are all children of the thin magenta line...
+const FPV: Vec4 = Vec4::new(0.3, 1.0, 0.4, 1.0);
 
 /// Translucent backing panel with a thin outline
 pub fn draw_plate(renderer: &RenderContext, rect: Rectangle) {
@@ -69,6 +71,10 @@ pub fn draw_attitude_indicator(
     r: f32,
     pitch: f32,
     roll: f32,
+    // (right, up) [deg]
+    fpv: Option<Vec2>,
+    // In degrees above the horizon
+    target_path: Option<f32>,
 ) {
     let pitch = pitch.to_degrees();
     let px_per_deg = r / 30.0; // 30deg visible
@@ -99,8 +105,51 @@ pub fn draw_attitude_indicator(
         renderer.draw_line(p - along * half_w, p + along * half_w, 1.0, DIM);
     }
 
+    // Draw the target pitch bar, if there is one
+    if let Some(deg) = target_path {
+        let p = horizon + sky_dir * (deg * px_per_deg);
+        for side in [-1.0, 1.0] {
+            renderer.draw_line(
+                p + along * (side * 0.12 * r),
+                p + along * (side * 0.4 * r),
+                2.0,
+                WAYPOINT,
+            );
+        }
+    }
+
     renderer.pop_clip();
     renderer.draw_rect(square, 1.0, OUTLINE);
+
+    // Draw the velocity marker
+    // TODO: it's a bit garish...
+    if let Some(fpv) = fpv {
+        let lim = r - 10.0;
+        let p = center + vec2(fpv.x, -fpv.y) * px_per_deg;
+        let p = vec2(
+            p.x.clamp(center.x - lim, center.x + lim),
+            p.y.clamp(center.y - lim, center.y + lim),
+        );
+
+        // draw the outline of the circle
+        // TODO: Should this be an apricot fn?
+        let rr = 5.0;
+        for i in 0..8 {
+            let a0 = i as f32 / 8.0 * std::f32::consts::TAU;
+            let a1 = (i + 1) as f32 / 8.0 * std::f32::consts::TAU;
+            renderer.draw_line(
+                p + vec2(a0.cos(), a0.sin()) * rr,
+                p + vec2(a1.cos(), a1.sin()) * rr,
+                1.5,
+                FPV,
+            );
+        }
+
+        // draw wings and tail
+        renderer.draw_line(p - vec2(rr + 9.0, 0.0), p - vec2(rr, 0.0), 1.5, FPV);
+        renderer.draw_line(p + vec2(rr, 0.0), p + vec2(rr + 9.0, 0.0), 1.5, FPV);
+        renderer.draw_line(p - vec2(0.0, rr), p - vec2(0.0, rr + 6.0), 1.5, FPV);
+    }
 
     // Fixed aircraft reference
     renderer.draw_line(
@@ -126,7 +175,12 @@ pub fn draw_attitude_indicator(
 }
 
 /// Heading tape drawn into `window`
-pub fn draw_compass(renderer: &RenderContext, window: Rectangle, heading_deg: f32) {
+pub fn draw_compass(
+    renderer: &RenderContext,
+    window: Rectangle,
+    heading_deg: f32,
+    bug_deg: Option<f32>,
+) {
     let px_per_deg = window.size.x / 90.0; // 45deg visible
     let direction = -1.0;
 
@@ -167,6 +221,19 @@ pub fn draw_compass(renderer: &RenderContext, window: Rectangle, heading_deg: f3
         ACCENT,
     );
 
+    // Draw the bug
+    if let Some(bug) = bug_deg {
+        let a = (bug - heading_deg + 540.0).rem_euclid(360.0) - 180.0;
+        let x = (center.x + direction * a * px_per_deg)
+            .clamp(window.pos.x + 5.0, window.pos.x + window.size.x - 5.0);
+        let top = window.pos.y;
+        let (l, r, tip) = (vec2(x - 5.0, top), vec2(x + 5.0, top), vec2(x, top + 7.0));
+        for (p, q) in [(l, r), (r, tip), (tip, l)] {
+            // TODO: this is pretty common for drawing the outlines of stuff, extract to fn
+            renderer.draw_line(p, q, 2.0, WAYPOINT);
+        }
+    }
+
     renderer.pop_clip();
     renderer.draw_rect(window, 1.0, OUTLINE);
 }
@@ -178,6 +245,9 @@ pub fn draw_minimap(
     map: TextureId,
     map_px: f32,
     heading: f32,
+    range: f32,
+    route: &[Vec2],
+    active: usize,
 ) {
     let square = Rectangle::new(center.x - r, center.y - r, 2.0 * r, 2.0 * r);
     renderer.draw_texture(
@@ -186,6 +256,31 @@ pub fn draw_minimap(
         Rectangle::new(0.0, map_px, map_px, -map_px),
         Vec4::new(1.0, 1.0, 1.0, 1.0),
     );
+
+    // Draw the route
+    let (s, c) = heading.sin_cos();
+    let to_screen = |d: Vec2| center + vec2(d.x * c + d.y * s, d.y * c - d.x * s) * (r / range);
+
+    renderer.push_clip(square);
+    let ahead = &route[active.min(route.len())..];
+    let mut prev = center;
+    for (i, &d) in ahead.iter().enumerate() {
+        let p = to_screen(d);
+        renderer.draw_line(prev, p, if i == 0 { 2.0 } else { 1.0 }, WAYPOINT);
+        renderer.fill_rect(Rectangle::new(p.x - 3.0, p.y - 3.0, 6.0, 6.0), WAYPOINT);
+        prev = p;
+    }
+    renderer.pop_clip();
+
+    // If the active waypoint is off the map, put a marker on the edge pointing at it
+    if let Some(&d) = ahead.first() {
+        let v = to_screen(d) - center;
+        let edge = (r - 6.0) / v.x.abs().max(v.y.abs());
+        if edge < 1.0 {
+            let p = center + v * edge;
+            renderer.fill_rect(Rectangle::new(p.x - 4.0, p.y - 4.0, 8.0, 8.0), WAYPOINT);
+        }
+    }
 
     // The plane is always pointing up
     let tip = center + vec2(0.0, -7.0);

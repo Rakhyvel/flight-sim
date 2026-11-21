@@ -390,6 +390,18 @@ impl Airplane {
             .atan2(-forward.z)
             .rem_euclid(std::f64::consts::TAU)
     }
+
+    /// Where the plane is moving relative to where it's nose is pointing, (right, up) [rad]
+    pub fn velocity_angles(&self) -> Option<(f64, f64)> {
+        if self.vel.norm() < 5.0 {
+            return None;
+        }
+        let v = nalgebra_glm::quat_rotate_vec3(
+            &nalgebra_glm::quat_inverse(&self.orientation),
+            &self.vel,
+        );
+        Some((v.z.atan2(v.x), v.y.atan2(v.x)))
+    }
 }
 
 /// Friction against sliding at `v`, up to `mu * normal_force`

@@ -1,5 +1,40 @@
+///! Stuff for deserializing airport and runway and navaid data from OurAirports.com
 use serde::Deserialize;
 use std::error::Error;
+
+#[derive(Deserialize)]
+struct AirportRow {
+    ident: String,
+    #[serde(rename = "type")]
+    kind: String,
+    name: String,
+    latitude_deg: f64,
+    longitude_deg: f64,
+}
+
+pub struct Airport {
+    pub ident: String,
+    pub name: String,
+    pub latitude_deg: f64,
+    pub longitude_deg: f64,
+}
+
+#[derive(Deserialize)]
+struct NavaidRow {
+    ident: String,
+    #[serde(rename = "type")]
+    kind: String,
+    latitude_deg: f64,
+    longitude_deg: f64,
+}
+
+/// A VOR or NDB
+pub struct Navaid {
+    pub ident: String,
+    pub kind: String,
+    pub latitude_deg: f64,
+    pub longitude_deg: f64,
+}
 
 /// A runway, by the lat/long [deg] of the two ends
 pub struct Runway {
@@ -28,6 +63,55 @@ struct RunwayRow {
     surface: String,
 }
 
+/// Loads a vec of airports from a csv
+pub fn load_airports(
+    path: &str,
+    keep: impl Fn(f64, f64) -> bool,
+) -> Result<Vec<Airport>, Box<dyn Error>> {
+    let mut airports = Vec::new();
+    for row in csv::Reader::from_path(path)?.deserialize() {
+        let row: AirportRow = row?;
+        let is_airport = matches!(
+            row.kind.as_str(),
+            "small_airport" | "medium_airport" | "large_airport"
+        );
+        if is_airport && keep(row.latitude_deg, row.longitude_deg) {
+            airports.push(Airport {
+                ident: row.ident,
+                name: row.name,
+                latitude_deg: row.latitude_deg,
+                longitude_deg: row.longitude_deg,
+            })
+        }
+    }
+    Ok(airports)
+}
+
+/// Loads a vec of navaids from a csv
+pub fn load_navaids(
+    path: &str,
+    keep: impl Fn(f64, f64) -> bool,
+) -> Result<Vec<Navaid>, Box<dyn Error>> {
+    let mut navaids = Vec::new();
+    for row in csv::Reader::from_path(path)?.deserialize() {
+        let row: NavaidRow = row?;
+        let useful = matches!(
+            row.kind.as_str(),
+            "VOR" | "VOR-DME" | "VORTAC" | "NDB" | "NDB-DME"
+        );
+        if useful && keep(row.latitude_deg, row.longitude_deg) {
+            navaids.push(Navaid {
+                ident: row.ident,
+                kind: row.kind,
+                latitude_deg: row.latitude_deg,
+                longitude_deg: row.longitude_deg,
+            })
+        }
+    }
+    Ok(navaids)
+}
+
+/// Loads a vec of runways from a csv
 pub fn load_runways(
     path: &str,
     keep: impl Fn((f64, f64), (f64, f64)) -> bool,
@@ -52,6 +136,7 @@ pub fn load_runways(
             continue;
         }
         let width = (row.width_ft.unwrap_or(100.0) * 0.3048) as f32;
+        println!("found {} {}", row.airport_ident, row.le_ident);
         runways.push(Runway {
             name: format!("{} {}", row.airport_ident, row.le_ident),
             start: le,

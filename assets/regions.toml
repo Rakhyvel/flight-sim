@@ -5,3 +5,7 @@ tiff = "maui.tif"
 [[regions]]
 name = "Denver"
 tiff = "denver.tif"
+
+[[regions]]
+name = "Seattle"
+tiff = "seattle.tif"

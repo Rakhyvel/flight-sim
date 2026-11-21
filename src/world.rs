@@ -10,10 +10,11 @@ use apricot::{
 use nalgebra_glm::{vec3, vec4, DVec2, DVec3, Mat4, Vec2, Vec3};
 
 use crate::{
-    airport::{self, Runway},
+    airport::{self, Airport, Navaid, Runway},
     heightmap::Heightmap,
     region::Region,
     runway_model, terrain_color,
+    waypoint::{Waypoint, WaypointKind},
 };
 
 const CHUNK_CELLS: u32 = 64;
@@ -34,11 +35,48 @@ pub struct World {
     pub chunks: ModelSet<ChunkCoord>,
     /// Everything is drawn relative to this
     pub origin: FloatingOrigin,
+    /// Every airport and navaid on the map
+    pub waypoints: Vec<Waypoint>,
 }
 
 impl World {
     pub fn load(renderer: &RenderContext, region: &Region) -> Result<Self, Box<dyn Error>> {
+        // Load the map
         let mut map = Heightmap::load_geotiff(&format!("assets/{}", region.tiff))?;
+
+        // Load the airports and navaids
+        let on_map = |lat: f64, lon: f64| map.contains_lat_lon(lat, lon, 0.0);
+        let mut waypoints = Vec::new();
+        for Airport {
+            ident,
+            latitude_deg,
+            longitude_deg,
+            ..
+        } in airport::load_airports("assets/airports.csv", on_map)?
+        {
+            waypoints.push(Waypoint {
+                name: ident,
+                pos: map.geo.to_world(latitude_deg, longitude_deg),
+                altitude: None,
+                kind: WaypointKind::Airport,
+            })
+        }
+        for Navaid {
+            ident,
+            latitude_deg,
+            longitude_deg,
+            ..
+        } in airport::load_navaids("assets/navaids.csv", on_map)?
+        {
+            waypoints.push(Waypoint {
+                name: ident,
+                pos: map.geo.to_world(latitude_deg, longitude_deg),
+                altitude: None,
+                kind: WaypointKind::Navaid,
+            })
+        }
+
+        // Load the runways
         let runways = airport::load_runways("assets/runways.csv", |le, he| {
             map.contains_lat_lon(le.0, le.1, EDGE_INSET)
                 && map.contains_lat_lon(he.0, he.1, EDGE_INSET)
@@ -78,6 +116,7 @@ impl World {
             chunk_grid: ChunkGrid::new(CHUNK_CELLS),
             chunks: ModelSet::new(),
             origin: FloatingOrigin::default(),
+            waypoints,
         })
     }
 
@@ -223,5 +262,39 @@ impl World {
                 &paint,
             );
         }
+    }
+
+    pub fn waypoint(&self, name: &str) -> Option<&Waypoint> {
+        self.waypoints.iter().find(|w| w.name == name)
+    }
+
+    /// Generate a straight-in approach to a runway
+    pub fn approach(&self, runway: &Runway) -> Vec<Waypoint> {
+        const M_PER_NM: f64 = 1852.0;
+        const INITIAL_FIX_OUT: f64 = 10.0 * M_PER_NM;
+        const INITIAL_FIX_HEIGHT: f64 = 3000.0 * 0.3048;
+        const FINAL_APPROACH_OUT: f64 = 5.0 * M_PER_NM;
+        const THRESHOLD_CROSSING_HEIGHT: f64 = 15.0;
+
+        let glide = 3.0_f64.to_radians().tan(); // 3 deg glide slope
+        let final_approach_height: f64 = glide * 5.0 * M_PER_NM;
+
+        let a = self.map.geo.to_world(runway.start.0, runway.start.1);
+        let b = self.map.geo.to_world(runway.end.0, runway.end.1);
+        let inbound = (b - a).normalize();
+        let (threshold_h, _) = self.ground(a.x, a.y);
+
+        let fix = |label: &str, out: f64, cross_height: f64| Waypoint {
+            name: format!("{} {label}", runway.name),
+            pos: a - inbound * out,
+            altitude: Some(threshold_h as f64 + cross_height),
+            kind: WaypointKind::Fix,
+        };
+
+        vec![
+            fix("IAF", INITIAL_FIX_OUT, INITIAL_FIX_HEIGHT),
+            fix("FAF", FINAL_APPROACH_OUT, final_approach_height),
+            fix("IAF", 0.0, THRESHOLD_CROSSING_HEIGHT),
+        ]
     }
 }

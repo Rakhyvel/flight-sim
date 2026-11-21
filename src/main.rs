@@ -1,3 +1,5 @@
+use std::f32::consts::FRAC_PI_4;
+
 use apricot::{
     app::{run, App, AppConfig, Scene, SceneCommand},
     audio::SynthStream,
@@ -12,7 +14,7 @@ use apricot::{
         RenderContext,
     },
 };
-use nalgebra_glm::{vec2, vec3, vec4, Mat4};
+use nalgebra_glm::{vec2, vec3, vec4, Mat4, Vec2};
 
 use crate::{
     airplane::Airplane,
@@ -20,8 +22,9 @@ use crate::{
     control::Controls,
     engine_sound::EngineSound,
     hud::{GAP, MARGIN, PAD},
-    minimap::{Minimap, MINIMAP_PX},
+    minimap::{Minimap, MINIMAP_PX, MINIMAP_RANGE},
     region::load_regions,
+    waypoint::Route,
     world::World,
 };
 
@@ -37,10 +40,15 @@ mod plane_model;
 mod region;
 mod runway_model;
 mod terrain_color;
+mod waypoint;
 mod world;
 
 const CAMERA_FAR: f32 = 60_000.0;
 const LOADS_PER_FRAME: usize = 2;
+
+const FT_PER_M: f64 = 3.28084;
+const KT_PER_MS: f64 = 1.94384;
+const M_PER_NM: f64 = 1852.0;
 
 // todo:
 // - [x] good aero model
@@ -102,11 +110,18 @@ struct FlightSim {
     prop_angle: f64, // [rad]
     prop_rps: f64,   // displayed revolutions per second
 
+    /// How far behind the plane the camera sits
+    cam_distance: f64,
+    fov: f32,
+
     engine_rpm: f64,
     engine_sound: Option<SynthStream<EngineSound>>,
 
     plane: Airplane,
     controls: Controls,
+
+    // TODO: some kinda mission struct
+    route: Route,
 }
 
 macro_rules! frag {
@@ -146,7 +161,7 @@ impl FlightSim {
             Some("water"),
         )?;
 
-        let light_dir = vec3(1.0, 0.5, 0.0).normalize();
+        let light_dir = vec3(0.5, 0.8, 0.0).normalize();
         let mut light = DirectionalLight::new(light_dir, 2048)?;
         light.frustum.shadow_distance = 150.0;
         app.renderer.set_light(Some(&light));
@@ -154,7 +169,7 @@ impl FlightSim {
         let regions = load_regions("assets/regions.toml");
         let region = regions
             .iter()
-            .find(|r| r.name == "Maui")
+            .find(|r| r.name == "Denver")
             .expect("no region");
         let world = World::load(renderer, region).expect("couldnt load region");
 
@@ -166,16 +181,23 @@ impl FlightSim {
             plane_prop_mesh: renderer.add_mesh_data(plane_model.prop, None),
             prop_angle: 0.0,
             prop_rps: 0.0,
+            cam_distance: 25.0,
+            fov: FRAC_PI_4,
             engine_rpm: 700.0,
             engine_sound: app.audio.start_synth(EngineSound::new()),
             world,
             minimap: Minimap::new(&app.renderer, light_dir)?,
             water_program,
-            plane: Airplane::new(AirplaneConfig::cessna172()),
+            plane: Airplane::new(AirplaneConfig::dash_8()),
             controls: Controls::new(),
+            route: Route::new(vec![]),
         };
 
-        let runway = sim.world.runway("PHOG 02").expect("no runway");
+        let mut waypoints = vec![sim.world.waypoint("KDEN").cloned().expect("no airport")];
+        let runway = sim.world.runway("KBJC 03").expect("no runway");
+        waypoints.extend(sim.world.approach(runway));
+        sim.route = Route::new(waypoints);
+
         let (spot, heading) = sim.world.spawn_point(runway);
         sim.plane.place(spot + vec3(0.0, 1.5, 0.0), heading);
         sim.world.recenter(sim.plane.pos);
@@ -187,35 +209,47 @@ impl FlightSim {
     fn draw_hud(&self, app: &App) {
         let renderer = &app.renderer;
         let screen = renderer.screen_size();
-        let (sw, sh) = (screen.x as f32, screen.y as f32);
+        let (screen_width, screen_height) = (screen.x as f32, screen.y as f32);
 
-        self.draw_flight_panel(renderer, sw, sh);
+        self.draw_flight_panel(renderer, screen_width, screen_height);
         self.draw_engine_panel(renderer);
-        self.draw_minimap_panel(renderer, sh);
+        self.draw_minimap_panel(renderer, screen_height);
+        self.draw_nav_panel(renderer, screen_width);
     }
 
     /// Draw attitude indicator stacked on the compass
-    fn draw_flight_panel(&self, renderer: &RenderContext, sw: f32, sh: f32) {
+    fn draw_flight_panel(&self, renderer: &RenderContext, screen_width: f32, screen_height: f32) {
         let r = 75.0;
         let compass_h = 26.0;
 
         let plate_w = PAD + 2.0 * r + PAD;
         let plate_h = PAD + 2.0 * r + GAP + compass_h + PAD;
         let plate = Rectangle::new(
-            sw - MARGIN - plate_w,
-            sh - MARGIN - plate_h,
+            screen_width - MARGIN - plate_w,
+            screen_height - MARGIN - plate_h,
             plate_w,
             plate_h,
         );
         hud::draw_plate(renderer, plate);
 
         let ai_center = plate.pos + vec2(PAD + r, PAD + r);
+        let fpv = self
+            .plane
+            .velocity_angles()
+            .map(|(right, up)| vec2(right.to_degrees() as f32, up.to_degrees() as f32));
+        let target_path = self.route.active().and_then(|wp| {
+            let (_, dist) = waypoint::bearing_distance(self.plane.pos, wp.pos);
+            wp.altitude
+                .map(|alt| (alt - self.plane.pos.y).atan2(dist).to_degrees() as f32)
+        });
         hud::draw_attitude_indicator(
             renderer,
             ai_center,
             r,
             self.plane.pitch() as f32,
             self.plane.roll() as f32,
+            fpv,
+            target_path,
         );
 
         let compass = Rectangle::new(
@@ -224,7 +258,77 @@ impl FlightSim {
             2.0 * r,
             compass_h,
         );
-        hud::draw_compass(renderer, compass, self.plane.heading().to_degrees() as f32);
+        let bug = self.route.active().map(|wp| {
+            let (brg, _) = waypoint::bearing_distance(self.plane.pos, wp.pos);
+            brg.to_degrees() as f32
+        });
+        hud::draw_compass(
+            renderer,
+            compass,
+            self.plane.heading().to_degrees() as f32,
+            bug,
+        );
+    }
+
+    fn draw_nav_panel(&self, renderer: &RenderContext, screen_width: f32) {
+        let Some(wp) = self.route.active() else {
+            return;
+        };
+        let (brg, dist) = waypoint::bearing_distance(self.plane.pos, wp.pos);
+        let speed = self.plane.vel.xz().norm(); // over the ground
+        let next = self.route.waypoints.get(self.route.active + 1); // TODO: depends too much on the waypoint impl details probably
+
+        let row_h = 26.0;
+        let readout_w = 190.0;
+        let rows = 4.0 + next.is_some() as u8 as f32;
+
+        let inner_h = rows * row_h + (rows - 1.0) * GAP;
+        let plate_w = PAD + readout_w + PAD;
+        let plate = Rectangle::new(
+            (screen_width - plate_w) / 2.0,
+            MARGIN,
+            plate_w,
+            PAD + inner_h + PAD,
+        );
+        hud::draw_plate(renderer, plate);
+        let row = |i: f32| {
+            Rectangle::new(
+                plate.pos.x + PAD,
+                plate.pos.y + PAD + i * (row_h + GAP),
+                readout_w,
+                row_h,
+            )
+        };
+
+        hud::draw_readout(renderer, row(0.0), "WPT", &wp.name);
+        hud::draw_readout(
+            renderer,
+            row(1.0),
+            "BRG",
+            &format!("{:03.0} {:.1} nm", brg.to_degrees(), dist / M_PER_NM),
+        );
+
+        // Time to get there at this ground speed
+        let ete = if speed > 1.0 {
+            let s = (dist / speed) as u32;
+            format!("{}:{:02}", s / 60, s % 60)
+        } else {
+            "--:--".to_string()
+        };
+        hud::draw_readout(renderer, row(2.0), "ETE", &ete);
+
+        // Waypoint altitude and angle
+        let target = match wp.altitude {
+            Some(alt) => {
+                let path = (alt - self.plane.pos.y).atan2(dist).to_degrees();
+                format!("{:.0} ft  {path:+.1}", alt * FT_PER_M)
+            }
+            None => "----".to_string(),
+        };
+        hud::draw_readout(renderer, row(3.0), "TGT", &target);
+        if let Some(next) = next {
+            hud::draw_readout(renderer, row(4.0), "NEXT", &next.name);
+        }
     }
 
     /// Draw altitude, speed and throttle
@@ -232,7 +336,10 @@ impl FlightSim {
         let row_h = 26.0;
         let readout_w = 84.0;
         let bar_w = 12.0;
-        let rows = 4.0;
+        let rows = 5.0;
+
+        let (ground, _) = self.world.ground(self.plane.pos.x, self.plane.pos.z);
+        let agl = self.plane.pos.y - ground as f64 - plane_model::gear_height(); // TODO: This come from the CONFIG!!!
 
         let inner_h = rows * row_h + (rows - 1.0) * GAP;
         let plate_w = PAD + readout_w + GAP + bar_w + PAD;
@@ -252,23 +359,29 @@ impl FlightSim {
             renderer,
             row(0.0),
             "ALT",
-            &format!("{:.0} m", self.plane.pos.y),
+            &format!("{:.0} ft", self.plane.pos.y * FT_PER_M),
         );
-        hud::draw_readout(
-            renderer,
-            row(1.0),
-            "SPD",
-            &format!("{:.0} m/s", self.plane.vel.norm()),
-        );
+        let ra = if agl * FT_PER_M < 2500.0 {
+            format!("{:.0} ft", (agl * FT_PER_M).max(0.0))
+        } else {
+            "---".into()
+        };
+        hud::draw_readout(renderer, row(1.0), "RA", &format!("{:.0} ft", &ra));
         hud::draw_readout(
             renderer,
             row(2.0),
+            "SPD",
+            &format!("{:.0} kt", self.plane.vel.norm() * KT_PER_MS),
+        );
+        hud::draw_readout(
+            renderer,
+            row(3.0),
             "THR",
             &format!("{:.0}%", self.controls.throttle * 100.0),
         );
         hud::draw_readout(
             renderer,
-            row(3.0),
+            row(4.0),
             "BRK",
             if self.controls.brakes > 0.5 {
                 "ON"
@@ -286,10 +399,26 @@ impl FlightSim {
         hud::draw_vertical_bar(renderer, bar, self.controls.throttle as f32);
     }
 
-    fn draw_minimap_panel(&self, renderer: &RenderContext, sh: f32) {
+    fn draw_minimap_panel(&self, renderer: &RenderContext, screen_height: f32) {
         let r = hud::INSTRUMENT_R;
         let plate_size = PAD + 2.0 * r + PAD;
-        let plate = Rectangle::new(MARGIN, sh - MARGIN - plate_size, plate_size, plate_size);
+        let plate = Rectangle::new(
+            MARGIN,
+            screen_height - MARGIN - plate_size,
+            plate_size,
+            plate_size,
+        );
+        let route: Vec<Vec2> = self
+            .route
+            .waypoints
+            .iter()
+            .map(|w| {
+                vec2(
+                    (w.pos.x - self.plane.pos.x) as f32,
+                    (w.pos.y - self.plane.pos.z) as f32,
+                )
+            })
+            .collect();
         hud::draw_plate(renderer, plate);
         hud::draw_minimap(
             renderer,
@@ -298,6 +427,9 @@ impl FlightSim {
             self.minimap.minimap.texture,
             MINIMAP_PX as f32,
             self.plane.heading() as f32,
+            MINIMAP_RANGE,
+            &route,
+            self.route.active,
         );
     }
 }
@@ -316,6 +448,7 @@ impl Scene for FlightSim {
         self.world.recenter(self.plane.pos);
         self.world
             .update(&app.renderer, self.plane.pos, LOADS_PER_FRAME);
+        self.route.update(self.plane.pos);
 
         let dt = app.dt.as_secs_f64();
         // For fixed speed props
@@ -365,15 +498,23 @@ impl Scene for FlightSim {
 
         // Position camera behind and slightly above the blended vector
         let plane_pos = self.plane.pos - self.world.origin.pos;
-        let cam_pos = plane_pos - view_dir * 25.0 + up * 6.0;
+        self.cam_distance =
+            (self.cam_distance * 0.9_f64.powf(app.input.mouse_wheel as f64)).clamp(0.8, 400.0);
+        let target_fov = if app.input.key_down(Scancode::Z) {
+            12.0_f32.to_radians()
+        } else {
+            FRAC_PI_4
+        };
+        self.fov += (target_fov - self.fov) * (8.0 * dt as f32).min(1.0);
+        let cam_pos = plane_pos - view_dir * self.cam_distance + up * (self.cam_distance * 0.24);
 
         let camera = Camera::new(
             cam_pos.cast(),
             (plane_pos + view_dir * 10.0).cast(), // Look ahead of the plane
             up.cast(),
             ProjectionKind::Perspective {
-                fov_rad: std::f32::consts::FRAC_PI_4,
-                near: 1.0,
+                fov_rad: self.fov,
+                near: 3.0,
                 far: CAMERA_FAR,
             },
         );

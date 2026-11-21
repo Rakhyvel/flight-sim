@@ -62,6 +62,14 @@ pub const CONTACTS: [ContactPoint; 10] = [
     airframe(2.42, -0.97, 0.0),
 ];
 
+/// Get the height of the lowest wheel [m]
+pub fn gear_height() -> f64 {
+    CONTACTS
+        .iter()
+        .map(|c| c.radius - c.pos.y)
+        .fold(0.0, f64::max)
+}
+
 /// Two meshes so they can be drawn in different colors
 pub struct AirplaneModel {
     /// Fuselage, wings, tail, struts and gear legs
