@@ -416,6 +416,10 @@ impl Airplane {
         );
         Some((v.z.atan2(v.x), v.y.atan2(v.x)))
     }
+
+    pub fn gear_height(&self) -> f64 {
+        self.config.gear_height()
+    }
 }
 
 /// Friction against sliding at `v`, up to `mu * normal_force`

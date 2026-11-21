@@ -42,6 +42,11 @@ impl Route {
         self.waypoints.get(self.active)
     }
 
+    /// The waypoints still to fly, active one first
+    pub fn upcoming(&self) -> &[Waypoint] {
+        &self.waypoints[self.active.min(self.waypoints.len())..]
+    }
+
     /// Check if the plane has passed the waypoint and advance to the next
     pub fn update(&mut self, plane_pos: DVec3) {
         let Some(wp) = self.active() else { return }; // skip if we're done with this route

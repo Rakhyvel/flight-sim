@@ -7,7 +7,7 @@ use apricot::{
     render::{assets::MeshId, lighting::ShadowPass, RenderContext},
     terrain::chunks::{ChunkCoord, ChunkGrid},
 };
-use nalgebra_glm::{vec3, vec4, DVec2, DVec3, Mat4, Vec2, Vec3};
+use nalgebra_glm::{vec3, vec4, DVec2, DVec3, Mat4, Vec3};
 
 use crate::{
     airport::{self, Airport, Navaid, Runway},
