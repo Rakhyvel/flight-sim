@@ -4,16 +4,10 @@ use apricot::camera::floating_origin::FloatingOrigin;
 use nalgebra_glm::{vec3, DMat3, DQuat, DVec3, Mat4, Vec3};
 
 use crate::{
-    config::AirplaneConfig,
+    config::{AirplaneConfig, ContactKind},
     control::Controls,
-    plane_model::{ContactKind, CONTACTS},
 };
 
-// TODO: These should prob come from config
-/// How far the gear squishes down when the plane is sitting still [m]
-const WHEEL_SAG: f64 = 0.05;
-/// Fraction of critical damping
-const WHEEL_DAMPING: f64 = 0.6;
 /// How much stiffer the airframe is than the tires (?)
 const AIRFRAME_STIFFNESS: f64 = 4.0;
 /// Tire sideways friction coeff
@@ -24,8 +18,6 @@ const ROLLING_FRICTION: f64 = 0.02;
 const SCRAPE_FRICTION: f64 = 0.5;
 /// Speed to ease off friction [m/s]
 const SLIP_SPEED: f64 = 0.3;
-/// How much full brakes add to the rolling wheel friction
-const MAX_BRAKE_FRICTION: f64 = 0.3;
 
 // TODO:
 // - split this off into RigidBodyState {pos, vel, orient, ang vel} and Deriv{vel, accel, ang vel, ang acc}, then define derivative() on Airplane for RK4
@@ -41,11 +33,15 @@ pub struct Airplane {
     body_angular_velocity: DVec3,
 
     config: AirplaneConfig,
+    inertia: DMat3,
     inertia_inv: DMat3,
+    control_limits: DVec3,
 }
 
 struct AeroState {
+    /// Air speed [m/s]
     speed: f64,
+    air_density: f64,
     dynamic_pressure: f64,
     angle_of_attack: f64,
     sideslip: f64,
@@ -71,15 +67,19 @@ const MAX_PHYSICS_STEP: f64 = 1.0 / 240.0;
 
 impl Airplane {
     pub fn new(config: AirplaneConfig) -> Self {
-        let inertia_inv = nalgebra_glm::inverse(&config.inertia);
+        let inertia = config.inertia.matrix();
+        let inertia_inv = nalgebra_glm::inverse(&inertia);
+        let control_limits = config.control_limits.radians();
 
         Self {
             pos: vec3(0.0, 40.0, 0.0),
             vel: vec3(55.0, 0.0, 0.0),
             orientation: DQuat::identity(),
             body_angular_velocity: vec3(0.0, 0.0, 0.0),
-            inertia_inv,
             config,
+            inertia,
+            inertia_inv,
+            control_limits,
         }
     }
 
@@ -106,7 +106,7 @@ impl Airplane {
 
     fn step(&mut self, controls: &Controls, dt: f64, ground: &impl Fn(f64, f64) -> (f32, Vec3)) {
         let aero = self.calc_aero_state();
-        let defl = Deflections::from_controls(controls, self.config.control_surface_limits);
+        let defl = Deflections::from_controls(controls, self.control_limits);
 
         let forces = self.calc_aero_forces(controls.throttle as f64, &aero, &defl);
         let torque = self.calc_aero_moments(&aero, &defl);
@@ -119,8 +119,8 @@ impl Airplane {
     fn calc_aero_state(&self) -> AeroState {
         let speed = self.vel.norm();
 
-        // TODO: Calc with alt and temp
-        let air_density = 1.225; // kg/m^3 at sea level
+        // TODO: Calc with temp too
+        let air_density = 1.225 * (-self.pos.y / 8500.0).exp();
         let dynamic_pressure = 0.5 * air_density * speed * speed;
 
         // Transform velocity into local body-space
@@ -135,6 +135,7 @@ impl Airplane {
         };
 
         AeroState {
+            air_density,
             speed,
             dynamic_pressure,
             angle_of_attack,
@@ -150,8 +151,11 @@ impl Airplane {
         let mut force = DVec3::zeros();
 
         // Thrust
-        // TODO: Make this a better model
-        force += forward * (throttle * self.config.max_thrust);
+        // TODO: Prop feathering and just a higher fidelity engine/prop model
+        let power = throttle * self.config.max_power * aero.air_density / 1.225;
+        let thrust = (throttle * self.config.max_thrust)
+            .min(self.config.prop_efficiency * power / aero.speed.max(1.0));
+        force += forward * thrust;
 
         // Lift and drag
         if aero.speed > 1.0 {
@@ -256,21 +260,23 @@ impl Airplane {
     ) -> (DVec3, DVec3) {
         let weight = self.config.mass * 9.81;
 
-        // Springs that hold the plane up with WHEEL_SAG of squash, with the weight shared between the wheels
-        let wheels = CONTACTS // TODO: aero shouldn't depend on the mesh module!! Put this in config!!!!
+        // Springs that hold the plane up with wheel sag of squash, with the weight shared between the wheels
+        let wheels = self
+            .config
+            .contacts
             .iter()
             .filter(|c| matches!(c.kind, ContactKind::Wheel { .. }))
             .count() as f64;
-        let k_wheel = weight / (wheels * WHEEL_SAG);
-        let c_wheel = WHEEL_DAMPING * 2.0 * (k_wheel * self.config.mass / wheels).sqrt();
+        let k_wheel = weight / (wheels * self.config.gear.sag);
+        let c_wheel = self.config.gear.damping * 2.0 * (k_wheel * self.config.mass / wheels).sqrt();
 
         let omega = nalgebra_glm::quat_rotate_vec3(&self.orientation, &self.body_angular_velocity);
         let forward = nalgebra_glm::quat_rotate_vec3(&self.orientation, &vec3(1.0, 0.0, 0.0));
 
         let mut force = DVec3::zeros();
         let mut torque = DVec3::zeros(); // world space, about the center of grav
-        for contact in &CONTACTS {
-            let r = nalgebra_glm::quat_rotate_vec3(&self.orientation, &contact.pos);
+        for contact in &self.config.contacts {
+            let r = nalgebra_glm::quat_rotate_vec3(&self.orientation, &DVec3::from(contact.pos));
             let center = self.pos + r;
             let (h, n) = ground(center.x, center.z);
             let h = h as f64;
@@ -289,7 +295,15 @@ impl Airplane {
             let v_t = v - n * v_n; // sliding along the ground
 
             let (k, c) = match contact.kind {
-                ContactKind::Wheel { .. } => (k_wheel, c_wheel),
+                ContactKind::Wheel { .. } => {
+                    let c = if v_n < 0.0 {
+                        c_wheel
+                    } else {
+                        // struts extend slowly, stops the plane from bouncing
+                        c_wheel * self.config.gear.rebound_damping
+                    };
+                    (k_wheel, c)
+                }
                 ContactKind::Airframe => (
                     k_wheel * AIRFRAME_STIFFNESS,
                     c_wheel * AIRFRAME_STIFFNESS.sqrt(),
@@ -304,8 +318,8 @@ impl Airplane {
                     // Wheels can move freely along their direction
                     let roll_dir = roll_dir.normalize();
                     // How much friction the brakes for this wheel adds
-                    let brake_friction =
-                        if brakes { brake_fraction } else { 0.0 } * MAX_BRAKE_FRICTION;
+                    let brake_friction = if brakes { brake_fraction } else { 0.0 }
+                        * self.config.gear.max_brake_friction;
                     // They grip sideways
                     let v_roll = roll_dir * v_t.dot(&roll_dir);
 
@@ -343,7 +357,7 @@ impl Airplane {
     }
 
     fn integrate_rotation(&mut self, torque: DVec3, dt: f64) {
-        let h = self.config.inertia * self.body_angular_velocity;
+        let h = self.inertia * self.body_angular_velocity;
         let angular_accel = self.inertia_inv * (torque - self.body_angular_velocity.cross(&h)); // hey this looks like orbit stuff!
         self.body_angular_velocity += angular_accel * dt;
 
@@ -414,20 +428,22 @@ mod tests {
     use super::*;
 
     fn plane_at(local_vel: DVec3) -> Airplane {
-        let mut p = Airplane::new(AirplaneConfig::cessna172());
+        let mut p = Airplane::new(
+            AirplaneConfig::load("assets/planes/cessna172.toml").expect("should be there"),
+        );
         p.vel = local_vel; // identity orientation, so body == world
         p
     }
 
     fn moments(p: &Airplane, controls: &Controls) -> DVec3 {
         let aero = p.calc_aero_state();
-        let defl = Deflections::from_controls(controls, p.config.control_surface_limits);
+        let defl = Deflections::from_controls(controls, p.control_limits);
         p.calc_aero_moments(&aero, &defl)
     }
 
     fn forces(p: &Airplane, controls: &Controls) -> DVec3 {
         let aero = p.calc_aero_state();
-        let defl = Deflections::from_controls(controls, p.config.control_surface_limits);
+        let defl = Deflections::from_controls(controls, p.control_limits);
         p.calc_aero_forces(controls.throttle as f64, &aero, &defl)
     }
 

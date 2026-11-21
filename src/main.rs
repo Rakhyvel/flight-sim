@@ -188,7 +188,9 @@ impl FlightSim {
             world,
             minimap: Minimap::new(&app.renderer, light_dir)?,
             water_program,
-            plane: Airplane::new(AirplaneConfig::dash_8()),
+            plane: Airplane::new(
+                AirplaneConfig::load("assets/planes/dash8.toml").expect("should exist"),
+            ),
             controls: Controls::new(),
             route: Route::new(vec![]),
         };

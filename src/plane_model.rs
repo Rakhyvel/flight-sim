@@ -1,37 +1,16 @@
 ///! Defines the plane mesh
-///! TODO: The mesh should be taken from a .obj, and idk about the contact points but probably a toml or something per plane.
-///!       Maybe the toml specifies the .obj, the textures, and the contact points? And the engine config? And the aero config?
+///! TODO: The meshes should be taken from a .obj, not generated here
 use apricot::mesh::{MeshData, Vertex};
-use nalgebra_glm::{vec2, vec3, DVec3, Vec3};
+use nalgebra_glm::{vec2, vec3, Vec3};
+
+use crate::config::{ContactKind, ContactPoint};
 
 /// Where the propeller hub sits, in body space [m]
 pub const PROP_HUB: Vec3 = Vec3::new(2.42, -0.02, 0.0);
 
-/// Something that can collide with the ground
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum ContactKind {
-    /// Smoothly roll across the ground
-    Wheel {
-        /// Whether this wheel has brakes
-        brakes: bool,
-    },
-    /// Agressively scrape against the ground
-    Airframe,
-}
-
-/// A sphere on the airplane that collides with the ground, in body space
-#[derive(Clone, Copy)]
-pub struct ContactPoint {
-    /// Center of the sphere [m]
-    pub pos: DVec3,
-    /// Radius of the sphere
-    pub radius: f64,
-    pub kind: ContactKind,
-}
-
 const fn wheel(x: f64, y: f64, z: f64, radius: f64, brakes: bool) -> ContactPoint {
     ContactPoint {
-        pos: DVec3::new(x, y, z),
+        pos: [x, y, z],
         radius,
         kind: ContactKind::Wheel { brakes },
     }
@@ -39,7 +18,7 @@ const fn wheel(x: f64, y: f64, z: f64, radius: f64, brakes: bool) -> ContactPoin
 
 const fn airframe(x: f64, y: f64, z: f64) -> ContactPoint {
     ContactPoint {
-        pos: DVec3::new(x, y, z),
+        pos: [x, y, z],
         radius: 0.1,
         kind: ContactKind::Airframe,
     }
@@ -66,7 +45,7 @@ pub const CONTACTS: [ContactPoint; 10] = [
 pub fn gear_height() -> f64 {
     CONTACTS
         .iter()
-        .map(|c| c.radius - c.pos.y)
+        .map(|c| c.radius - c.pos[1])
         .fold(0.0, f64::max)
 }
 

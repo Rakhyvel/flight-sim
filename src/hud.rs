@@ -182,7 +182,7 @@ pub fn draw_compass(
     bug_deg: Option<f32>,
 ) {
     let px_per_deg = window.size.x / 90.0; // 45deg visible
-    let direction = -1.0;
+    let direction = 1.0; // -1 makes it reversed like a compass, 1 makes it normal like a tape
 
     let center = window.pos + window.size / 2.0;
     let bottom = window.pos.y + window.size.y;

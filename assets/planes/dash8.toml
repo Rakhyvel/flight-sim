@@ -1,0 +1,79 @@
+name = "Dash 8 Q400"
+mass = 25000.0
+wing_area = 63.1
+wingspan = 28.4
+mean_chord = 2.3
+lift_slope = 5.5
+zero_lift_coefficient = 0.18
+max_cl = 1.6
+min_cl = -0.7
+drag_coefficient_base = 0.026
+oswald_efficiency = 0.85
+cy_beta = -0.4
+
+max_thrust = 52000.0
+max_power = 7560000.0
+prop_efficiency = 0.85
+
+inertia = { roll = 45000.0, yaw = 150000.0, pitch = 120000.0 }
+control_limits = { elevator = 20.0, aileron = 15.0, rudder = 22.0 }
+
+contacts = [
+    { kind = "wheel", pos = [
+        -1.2,
+        -1.85,
+        -4.4,
+    ], radius = 0.45, brakes = true },
+    { kind = "wheel", pos = [
+        -1.2,
+        -1.85,
+        4.4,
+    ], radius = 0.45, brakes = true },
+    { kind = "wheel", pos = [
+        12.7,
+        -1.95,
+        0.0,
+    ], radius = 0.33 },
+    { kind = "airframe", pos = [
+        -1.0,
+        1.6,
+        -14.2,
+    ] },
+    { kind = "airframe", pos = [
+        -1.0,
+        1.6,
+        14.2,
+    ] },
+    { kind = "airframe", pos = [
+        -14.0,
+        -0.6,
+        0.0,
+    ] },
+]
+
+[derivs]
+c_lift_elevator = 0.5
+c_side_rudder = 0.22
+cm_0 = 0.03
+cm_alpha = -2.1
+cm_q = -18.5
+cm_elevator = -1.45
+cl_beta = -0.12
+cl_p = -0.65
+cl_aileron = 0.15
+cn_beta = 0.09
+cn_r = -0.22
+cn_rudder = -0.08
+
+[gear]
+sag = 0.2
+damping = 0.7
+rebound_damping = 3.0
+max_brake_friction = 0.5
+
+[flaps]
+detents = [0.0, 5.0, 10.0, 15.0, 35.0]
+delta_cl = 1.1
+delta_max_cl = 1.0
+delta_cd = 0.08
+delta_cm = -0.15
