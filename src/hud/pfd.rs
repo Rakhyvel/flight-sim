@@ -128,7 +128,7 @@ fn draw_attitude_indicator(
     renderer.draw_line(g - along * big, g + along * big, big, GROUND);
     renderer.draw_line(horizon - along * big, horizon + along * big, 1.0, TEXT);
 
-    // Ladder: numbered lines every 10deg, shorter ones every 5, ticks every 2.5
+    // Draw the ladder
     renderer.set_font(t.label);
     for i in -36_i32..=36 {
         if i == 0 {
@@ -169,7 +169,7 @@ fn draw_attitude_indicator(
     renderer.pop_clip();
     renderer.draw_rect(square, 1.0, OUTLINE);
 
-    // Fixed aircraft reference: two bent wings and a dot
+    // Draw the aircraft reference
     for side in [-1.0, 1.0] {
         let outer = center + vec2(side * 0.55 * r, 0.0);
         let inner = center + vec2(side * 0.2 * r, 0.0);

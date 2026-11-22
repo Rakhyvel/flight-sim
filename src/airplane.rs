@@ -18,6 +18,9 @@ const ROLLING_FRICTION: f64 = 0.02;
 const SCRAPE_FRICTION: f64 = 0.5;
 /// Speed to ease off friction [m/s]
 const SLIP_SPEED: f64 = 0.3;
+/// Where each wing half's lift acts, as a fraction of the wingspan out from the middle
+/// (center of lift for an elliptical half wing)
+const LIFT_ARM: f64 = 0.21;
 
 // TODO:
 // - split this off into RigidBodyState {pos, vel, orient, ang vel} and Deriv{vel, accel, ang vel, ang acc}, then define derivative() on Airplane for RK4
@@ -110,10 +113,11 @@ impl Airplane {
 
         let forces = self.calc_aero_forces(controls.throttle as f64, &aero, &defl);
         let torque = self.calc_aero_moments(&aero, &defl);
+        let (wing_force, wing_torque) = self.calc_wing_forces(&aero, &defl);
         let (ground_force, ground_torque) = self.calc_ground_forces(controls.brakes as f64, ground);
 
-        self.integrate_translation(forces + ground_force, dt);
-        self.integrate_rotation(torque + ground_torque, dt);
+        self.integrate_translation(forces + wing_force + ground_force, dt);
+        self.integrate_rotation(torque + wing_torque + ground_torque, dt);
     }
 
     fn calc_aero_state(&self) -> AeroState {
@@ -144,55 +148,83 @@ impl Airplane {
     }
 
     fn calc_aero_forces(&self, throttle: f64, aero: &AeroState, defl: &Deflections) -> DVec3 {
-        let forward = nalgebra_glm::quat_rotate_vec3(&self.orientation, &DVec3::new(1.0, 0.0, 0.0));
-        let up = nalgebra_glm::quat_rotate_vec3(&self.orientation, &DVec3::new(0.0, 1.0, 0.0));
-        let right = nalgebra_glm::quat_rotate_vec3(&self.orientation, &DVec3::new(0.0, 0.0, 1.0));
-
         let mut force = DVec3::zeros();
 
         // Thrust
-        // TODO: Prop feathering and just a higher fidelity engine/prop model
+        let forward = nalgebra_glm::quat_rotate_vec3(&self.orientation, &DVec3::new(1.0, 0.0, 0.0));
         let power = throttle * self.config.max_power * aero.air_density / 1.225;
         let thrust = (throttle * self.config.max_thrust)
             .min(self.config.prop_efficiency * power / aero.speed.max(1.0));
         force += forward * thrust;
 
-        // Lift and drag
+        // Sideways push on the fuselage and fin from sideslip and rudder
         if aero.speed > 1.0 {
-            let c_lift = self.lift_coefficient(aero.angle_of_attack)
-                + self.config.derivs.c_lift_elevator * defl.elevator;
-            let flow_dir = self.vel.normalize();
-
-            // Lift, perpendicular to the flow
-            let lift_magnitude = aero.dynamic_pressure * self.config.wing_area * c_lift;
-            let lift_dir = up - flow_dir * up.dot(&flow_dir);
-            let lift_dir = if lift_dir.norm_squared() > 1e-6 {
-                lift_dir.normalize()
-            } else {
-                up
-            };
-            force += lift_dir * lift_magnitude;
-
-            // Side force in standard aero frame
+            let right =
+                nalgebra_glm::quat_rotate_vec3(&self.orientation, &DVec3::new(0.0, 0.0, 1.0));
             let c_side = self.config.cy_beta * aero.sideslip
                 + self.config.derivs.c_side_rudder * defl.rudder;
             force += right * (aero.dynamic_pressure * self.config.wing_area * c_side);
-
-            // Parasite + induced drag
-            let aspect_ratio = self.config.wingspan * self.config.wingspan / self.config.wing_area;
-            let c_drag_attached = self.config.drag_coefficient_base
-                + (c_lift * c_lift)
-                    / (std::f64::consts::PI * aspect_ratio * self.config.oswald_efficiency);
-            let c_drag_flat_plate = 2.0 * aero.angle_of_attack.sin().powi(2);
-            let c_drag = c_drag_attached.max(c_drag_flat_plate);
-            let drag_magnitude = aero.dynamic_pressure * self.config.wing_area * c_drag;
-            force += -flow_dir * drag_magnitude;
         }
 
         // Gravity
         force.y -= self.config.mass * 9.81;
 
         force
+    }
+
+    fn calc_wing_forces(&self, aero: &AeroState, defl: &Deflections) -> (DVec3, DVec3) {
+        if aero.speed < 1.0 {
+            return (DVec3::zeros(), DVec3::zeros());
+        }
+
+        let c = &self.config;
+        let aspect_ratio = c.wingspan * c.wingspan / c.wing_area;
+        let inv_orientation = nalgebra_glm::quat_inverse(&self.orientation);
+        let body_vel = nalgebra_glm::quat_rotate_vec3(&inv_orientation, &self.vel);
+
+        // control surfaces giveth lift and taketh it away
+        let aileron_cl = c.derivs.cl_aileron * defl.aileron / LIFT_ARM;
+        let elevator_cl = c.derivs.c_lift_elevator * defl.elevator;
+
+        let mut force = DVec3::zeros();
+        let mut torque = DVec3::zeros();
+        for side in [-1.0, 1.0] {
+            // left, right
+            let arm = vec3(0.0, 0.0, side * LIFT_ARM * c.wingspan);
+
+            // the air this half moves through, including the plane rotating
+            let v = body_vel + self.body_angular_velocity.cross(&arm);
+            let speed = v.norm();
+            if speed < 1.0 {
+                continue;
+            }
+            let flow = v / speed;
+            let alpha = (-v.y).atan2(v.x);
+            let q = 0.5 * aero.air_density * speed * speed;
+
+            let c_lift = self.lift_coefficient(alpha) + elevator_cl - side * aileron_cl;
+
+            let c_drag_attached = c.drag_coefficient_base
+                + c_lift * c_lift / (std::f64::consts::PI * aspect_ratio * c.oswald_efficiency);
+            let c_drag = c_drag_attached.max(2.0 * alpha.sin().powi(2));
+
+            let up = DVec3::y();
+            let lift_dir = up - flow * up.dot(&flow);
+            let lift_dir = if lift_dir.norm_squared() > 1e-6 {
+                lift_dir.normalize()
+            } else {
+                up
+            };
+
+            let f = (lift_dir * c_lift - flow * c_drag) * (q * 0.5 * c.wing_area);
+            force += f;
+            torque += arm.cross(&f);
+        }
+
+        (
+            nalgebra_glm::quat_rotate_vec3(&self.orientation, &force),
+            torque,
+        )
     }
 
     fn lift_coefficient(&self, alpha: f64) -> f64 {
@@ -228,18 +260,16 @@ impl Airplane {
         // Convert to the standard aero axes (x fwd, y right, z down)
         let alpha = aero.angle_of_attack;
         let beta = aero.sideslip;
-        let p = self.body_angular_velocity.x;
         let q = self.body_angular_velocity.z;
         let r = -self.body_angular_velocity.y;
 
         // Non-dimensional rates
-        let p_hat = p * self.config.wingspan / (2.0 * aero.speed);
         let q_hat = q * self.config.mean_chord / (2.0 * aero.speed);
         let r_hat = r * self.config.wingspan / (2.0 * aero.speed);
 
         // Moment coeffs
         let d = &self.config.derivs;
-        let c_roll = d.cl_beta * beta + d.cl_p * p_hat + d.cl_aileron * defl.aileron;
+        let c_roll = d.cl_beta * beta;
         let c_pitch = d.cm_0 + d.cm_alpha * alpha + d.cm_q * q_hat + d.cm_elevator * defl.elevator;
         let c_yaw = d.cn_beta * beta + d.cn_r * r_hat + d.cn_rudder * defl.rudder;
 
@@ -405,18 +435,6 @@ impl Airplane {
             .rem_euclid(std::f64::consts::TAU)
     }
 
-    /// Where the plane is moving relative to where it's nose is pointing, (right, up) [rad]
-    pub fn velocity_angles(&self) -> Option<(f64, f64)> {
-        if self.vel.norm() < 5.0 {
-            return None;
-        }
-        let v = nalgebra_glm::quat_rotate_vec3(
-            &nalgebra_glm::quat_inverse(&self.orientation),
-            &self.vel,
-        );
-        Some((v.z.atan2(v.x), v.y.atan2(v.x)))
-    }
-
     pub fn gear_height(&self) -> f64 {
         self.config.gear_height()
     }
@@ -433,7 +451,7 @@ mod tests {
 
     fn plane_at(local_vel: DVec3) -> Airplane {
         let mut p = Airplane::new(
-            AirplaneConfig::load("assets/planes/cessna172.toml").expect("should be there"),
+            AirplaneConfig::load("assets/planes/dash8.toml").expect("should be there"),
         );
         p.vel = local_vel; // identity orientation, so body == world
         p
@@ -442,13 +460,14 @@ mod tests {
     fn moments(p: &Airplane, controls: &Controls) -> DVec3 {
         let aero = p.calc_aero_state();
         let defl = Deflections::from_controls(controls, p.control_limits);
-        p.calc_aero_moments(&aero, &defl)
+        p.calc_aero_moments(&aero, &defl) + p.calc_wing_forces(&aero, &defl).1
     }
 
     fn forces(p: &Airplane, controls: &Controls) -> DVec3 {
         let aero = p.calc_aero_state();
         let defl = Deflections::from_controls(controls, p.control_limits);
         p.calc_aero_forces(controls.throttle as f64, &aero, &defl)
+            + p.calc_wing_forces(&aero, &defl).0
     }
 
     #[test]
@@ -542,5 +561,50 @@ mod tests {
         let mut c = Controls::new();
         c.yaw = 1.0; // rudder trailing edge left
         assert!(forces(&p, &c).z > base.z, "side force to the right (+Z)");
+    }
+
+    #[test]
+    fn ailerons_cause_adverse_yaw() {
+        // Rolling right puts more lift, so more drag, on the left half, which drags the nose left
+        let p = plane_at(vec3(55.0, 0.0, 0.0));
+        let base = moments(&p, &Controls::new());
+        let mut c = Controls::new();
+        c.roll = 1.0; // E
+        assert!(
+            moments(&p, &c).y > base.y,
+            "rolling right yaws the nose left (+Y)"
+        );
+    }
+
+    #[test]
+    fn rolling_is_damped_before_the_stall() {
+        let mut p = plane_at(vec3(55.0, 0.0, 0.0));
+        p.body_angular_velocity = vec3(0.5, 0.0, 0.0); // rolling right
+        assert!(
+            moments(&p, &Controls::new()).x < 0.0,
+            "the down-going wing lifts and resists"
+        );
+    }
+
+    #[test]
+    fn rolling_feeds_itself_past_the_stall() {
+        // A few degrees past the stall, the down-going wing loses lift and keeps falling
+        let alpha = (p_stall_alpha() + 4.0_f64.to_radians()).tan();
+        let mut p = plane_at(vec3(55.0, -55.0 * alpha, 0.0));
+        p.body_angular_velocity = vec3(0.2, 0.0, 0.0); // rolling right
+        let roll = p
+            .calc_wing_forces(
+                &p.calc_aero_state(),
+                &Deflections::from_controls(&Controls::new(), p.control_limits),
+            )
+            .1
+            .x;
+        assert!(roll > 0.0, "autorotation: the roll keeps going");
+    }
+
+    /// Where the test plane's lift curve tops out
+    fn p_stall_alpha() -> f64 {
+        let p = plane_at(vec3(55.0, 0.0, 0.0));
+        (p.config.max_cl - p.config.zero_lift_coefficient) / p.config.lift_slope
     }
 }

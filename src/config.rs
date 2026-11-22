@@ -110,7 +110,6 @@ pub struct StabilityDerivatives {
     pub cm_elevator: f64,
     // Roll
     pub cl_beta: f64,
-    pub cl_p: f64,
     pub cl_aileron: f64,
     // Yaw
     pub cn_beta: f64,

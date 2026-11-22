@@ -3,51 +3,8 @@
 use apricot::mesh::{MeshData, Vertex};
 use nalgebra_glm::{vec2, vec3, Vec3};
 
-use crate::config::{ContactKind, ContactPoint};
-
 /// Where the propeller hub sits, in body space [m]
 pub const PROP_HUB: Vec3 = Vec3::new(2.42, -0.02, 0.0);
-
-const fn wheel(x: f64, y: f64, z: f64, radius: f64, brakes: bool) -> ContactPoint {
-    ContactPoint {
-        pos: [x, y, z],
-        radius,
-        kind: ContactKind::Wheel { brakes },
-    }
-}
-
-const fn airframe(x: f64, y: f64, z: f64) -> ContactPoint {
-    ContactPoint {
-        pos: [x, y, z],
-        radius: 0.1,
-        kind: ContactKind::Airframe,
-    }
-}
-
-pub const CONTACTS: [ContactPoint; 10] = [
-    // Gear
-    wheel(-0.5, -1.1, -1.2, 0.25, true),
-    wheel(-0.5, -1.1, 1.2, 0.25, true),
-    wheel(1.9, -1.05, 0.0, 0.2, false),
-    // Wingtips
-    airframe(-0.3, 0.9, -5.5), // left
-    airframe(-0.3, 0.9, 5.5),  // right
-    // Tail
-    airframe(-5.3, 0.0, 0.0),  // bottom of the fuselage
-    airframe(-5.1, 0.2, -1.7), // left stab
-    airframe(-5.1, 0.2, 1.7),  // right stab
-    airframe(-5.3, 1.55, 0.0), // top of fin
-    // Prop tip at its lowest
-    airframe(2.42, -0.97, 0.0),
-];
-
-/// Get the height of the lowest wheel [m]
-pub fn gear_height() -> f64 {
-    CONTACTS
-        .iter()
-        .map(|c| c.radius - c.pos[1])
-        .fold(0.0, f64::max)
-}
 
 /// Two meshes so they can be drawn in different colors
 pub struct AirplaneModel {

@@ -59,7 +59,6 @@ cm_alpha = -2.1
 cm_q = -18.5
 cm_elevator = -1.45
 cl_beta = -0.12
-cl_p = -0.65
 cl_aileron = 0.15
 cn_beta = 0.09
 cn_r = -0.22

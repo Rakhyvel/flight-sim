@@ -72,7 +72,7 @@ fn cells(data: &FlightData) -> Vec<Cell> {
         cell("RA ft", radar_altitude(data.height_above_ground), TEXT, 5),
         cell(
             "HDG",
-            format!("{:03.0}°", data.heading.to_degrees()),
+            format!("{:03.0}", data.heading.to_degrees()),
             TEXT,
             4,
         ),

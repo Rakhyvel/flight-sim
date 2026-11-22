@@ -29,7 +29,6 @@ pub struct FlightData {
 
 pub struct NavData {
     pub name: String,
-    pub next: Option<String>,
     /// Compass bearing to the waypoint [rad]
     pub bearing: f32,
     pub distance: f32,
@@ -80,7 +79,6 @@ impl NavData {
 
         Some(Self {
             name: wp.name.clone(),
-            next: upcoming.get(1).map(|w| w.name.clone()),
             bearing: bearing as f32,
             distance: distance as f32,
             time_to_go: (ground_speed > 1.0).then(|| (distance / ground_speed) as f32),
