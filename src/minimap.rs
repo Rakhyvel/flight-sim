@@ -10,12 +10,16 @@ use nalgebra_glm::{vec3, vec4, Mat4, Vec3};
 
 use crate::{airplane::Airplane, heightmap::Heightmap};
 
+/// The map doesn't change all that much, only redraw it every this many frames to reduce lag
+const REDRAW_EVERY: u32 = 4;
+
 pub const MINIMAP_PX: u32 = 256;
 pub const MINIMAP_RANGE: f32 = 5_000.0; // meters from the plane to the edge of the map
 
 pub struct Minimap {
     pub minimap: RenderTarget,
     minimap_light: DirectionalLight,
+    frame: u32,
 }
 
 impl Minimap {
@@ -31,6 +35,7 @@ impl Minimap {
         Ok(Self {
             minimap,
             minimap_light,
+            frame: 0,
         })
     }
 
@@ -44,6 +49,13 @@ impl Minimap {
         old_light: &DirectionalLight,
         origin: &FloatingOrigin,
     ) {
+        // Only draw every couple frames or so to reduce lag
+        let due = self.frame % REDRAW_EVERY == 0;
+        self.frame = self.frame.wrapping_add(1);
+        if !due {
+            return;
+        }
+
         let h = plane.heading();
         let pos = origin.relative(plane.pos);
         let forward = vec3(h.sin(), 0.0, -h.cos()).cast();

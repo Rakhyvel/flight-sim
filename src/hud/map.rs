@@ -15,6 +15,9 @@ use super::{widgets, ACCENT, HALO, TEXT, WAYPOINT};
 /// Half the map's size [em]
 const R: f32 = 8.0;
 
+/// The map doesn't change all that much, only redraw it every this many frames to reduce lag
+const REDRAW_EVERY: u32 = 4;
+
 fn radius(t: &Theme) -> f32 {
     (R * t.em).round()
 }
