@@ -1,7 +1,6 @@
 uniform vec3 u_sun_dir;
 uniform vec3 u_camera_pos;
 uniform float u_time;
-uniform int u_minimap; // 1 while drawing the minimap, no air between the camera and the ground
 uniform vec2 u_origin;
 uniform sampler2D u_sky_view;
 uniform sampler2D u_sea_sky;
@@ -103,15 +102,12 @@ void main() {
 
     // Haze between here and the camera
     vec3 trans = vec3(1.0);
-    vec3 inscatter = vec3(0.0);
-    if (u_minimap == 0) {
-        inscatter = scatter(u_camera_pos.y, v, l, dist, 8, trans);
-    }
+    vec3 inscatter = scatter(u_camera_pos.y, v, l, dist, 8, trans);
     vec3 result = water * trans + inscatter;
 
     // blend into far-off sea
     float edge = smoothstep(0.7 * CAMERA_FAR, CAMERA_FAR, dist);
-    if (u_minimap == 0 && edge > 0.0) {
+    if (edge > 0.0) {
         vec3 far = sky_lut(u_sky_view, u_camera_pos.y, v, l); // already has the sea below the horizon in it
         result = mix(result, far, edge);
     }

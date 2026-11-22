@@ -111,19 +111,6 @@ pub fn draw_tape(renderer: &RenderContext, t: &Theme, rect: Rectangle, tape: &Ta
             renderer.draw_text(vec2(x, y - s.y / 2.0), &text, TEXT);
         }
     }
-
-    if let Some(bug) = tape.bug {
-        let b = 0.4 * t.em;
-        let y = to_y(bug).clamp(rect.pos.y + b, rect.pos.y + rect.size.y - b);
-        let tip = vec2(edge + inward * 1.6 * b, y);
-        draw_outline(
-            renderer,
-            &[vec2(edge, y - b), tip, vec2(edge, y + b)],
-            2.0,
-            WAYPOINT,
-        );
-    }
-    renderer.pop_clip();
     renderer.draw_rect(rect, 1.0, OUTLINE);
 
     // Current value, boxed across the middle
@@ -144,4 +131,17 @@ pub fn draw_tape(renderer: &RenderContext, t: &Theme, rect: Rectangle, tape: &Ta
         &text,
         TEXT,
     );
+
+    if let Some(bug) = tape.bug {
+        let b = 0.4 * t.em;
+        let y = to_y(bug).clamp(rect.pos.y + b, rect.pos.y + rect.size.y - b);
+        let tip = vec2(edge + inward * 1.6 * b, y);
+        draw_outline(
+            renderer,
+            &[vec2(edge, y - b), tip, vec2(edge, y + b)],
+            2.0,
+            WAYPOINT,
+        );
+    }
+    renderer.pop_clip();
 }

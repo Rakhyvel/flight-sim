@@ -9,12 +9,12 @@ use apricot::{
     model_set::{Model, ModelSet},
     opengl::DrawOptions,
     render::{
-        assets::{MeshId, TextureId},
+        assets::{MeshId, ProgramId, TextureId},
         lighting::ShadowPass,
         RenderContext,
     },
 };
-use nalgebra_glm::{vec3, vec4, DVec2, DVec3, Mat4, Vec3};
+use nalgebra_glm::{vec3, vec4, DVec2, DVec3, Mat4, Vec3, Vec4};
 
 use crate::{
     airport::{self, Airport, Navaid, Runway},
@@ -166,10 +166,6 @@ impl World {
                 )
             })
             .collect();
-
-        renderer
-            .uniform(renderer.builtins.program_3d, "u_normal_map")
-            .set_i32(NORMAL_UNIT as i32);
 
         Ok(Self {
             runways,
@@ -328,8 +324,6 @@ impl World {
     }
 
     pub fn draw(&self, renderer: &RenderContext, camera: DVec3) {
-        let p = renderer.builtins.program_3d;
-
         // Draw runways
         let asphalt = DrawOptions {
             depth_bias: Some((-1.0, -4.0)),
@@ -362,19 +356,36 @@ impl World {
             );
         }
 
-        self.draw_terrain(renderer);
+        self.draw_terrain(renderer, renderer.builtins.program_3d);
     }
 
-    /// Draw the ground the current camera can see
-    pub fn draw_terrain(&self, renderer: &RenderContext) {
-        let p = renderer.builtins.program_3d;
-        renderer.uniform(p, "u_detail").set_f32(1.0);
+    /// Draw the ground the current camera can see with `program`
+    pub fn draw_terrain(&self, renderer: &RenderContext, program: ProgramId) {
+        // Set the tile uniforms
+        renderer.uniform(program, "u_texture").set_i32(0);
+        renderer
+            .uniform(program, "u_normal_map")
+            .set_i32(NORMAL_UNIT as i32);
+        renderer
+            .uniform(program, "u_color")
+            .set_vec4(&Vec4::repeat(1.0));
+        renderer.uniform(program, "u_detail").set_f32(1.0); // programs without this just ignore it
+
+        // Draw each tile
         let frustum = renderer.camera_frustum();
         for (tile, model) in self.drawn.iter_frustum(&frustum) {
+            renderer.bind_texture_unit(0, model.texture);
             renderer.bind_texture_unit(NORMAL_UNIT, self.tiles[&tile].normals);
-            renderer.draw_mesh_textured(model.mesh, model.texture, model.transform, model.tint);
+            renderer.draw_mesh_with_program(
+                program,
+                model.mesh,
+                model.transform,
+                &DrawOptions::default(),
+            );
         }
-        renderer.uniform(p, "u_detail").set_f32(0.0);
+
+        // cleanup after yourself!
+        renderer.uniform(program, "u_detail").set_f32(0.0);
     }
 
     pub fn waypoint(&self, name: &str) -> Option<&Waypoint> {

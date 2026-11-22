@@ -123,9 +123,8 @@ fn draw_attitude_indicator(
     let square = Rectangle::new(center.x - r, center.y - r, 2.0 * r, 2.0 * r);
     renderer.push_clip(square);
 
+    // Draw the sky and horizon
     renderer.fill_rect(square, SKY);
-
-    // Faint ground fill below the horizon, as a huge rotated rect
     let big = 5.0 * r;
     let g = horizon - sky_dir * (big / 2.0);
     renderer.draw_line(g - along * big, g + along * big, big, GROUND);
@@ -282,7 +281,7 @@ fn draw_compass(
         }
     }
 
-    // Standard rate marks: 3 deg/s for 6 seconds
+    // Draw the rate marks, 3 deg/s for 6 seconds
     for side in [-1.0, 1.0] {
         let x = center.x + side * 18.0 * px_per_deg;
         renderer.draw_line(vec2(x, bottom - 1.8 * tick), vec2(x, bottom), 1.0, TEXT);

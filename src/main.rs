@@ -9,7 +9,7 @@ use apricot::{
     mesh::MeshData,
     opengl::DrawOptions,
     render::{
-        assets::{MeshId, ProgramId, TextureId},
+        assets::{MeshId, ProgramId},
         lighting::DirectionalLight,
     },
 };
@@ -58,12 +58,15 @@ const LOADS_PER_FRAME: usize = 1;
 
 // todo:
 // - [x] good aero model
+//     - [ ] ground effect
 // - [x] joystick
 // - [x] better plane model
 //     - [ ] c to free mouse orbit, and joystick hat
 //     - [ ] z to zoom in ON THE VELOCITY VECTOR not the plane
 // - [x] better worldgen model (like 100km, real maps, hawaii, denver)
-//     - [ ] mini map that's stylized like a real map
+//     - [x] mini map that's stylized like a real map
+//     - [ ] zoom in and out with [ and ]
+//     - [ ] able to program and override routes and stuff
 // - [ ] weather, wind, time of day
 //     - [x] distance haze, fog
 //     - [ ] Higher LOD shadow maps for the airplane, maybe cascading shadow maps
@@ -82,8 +85,6 @@ const LOADS_PER_FRAME: usize = 1;
 // - [x] flaps, gear, slats, aerobrakes, whatever
 //     - [ ] stall horn for the cessna
 //     - [ ] g limits
-// - [ ] landing, airports
-//     - [ ] ground effect
 // - [ ] different planes (172, pa-28, cub, otter, citation, 737-200)
 //      - [x] load these from tomls
 //      - [ ] actual .obj meshes and textures
@@ -151,6 +152,7 @@ impl FlightSim {
                 "shaders/atmosphere.glsl",
                 "shaders/tonemap.glsl",
                 "shaders/noise.glsl",
+                "shaders/terrain.glsl",
                 "shaders/3d.frag",
             ),
             Some("3d"),
@@ -192,7 +194,7 @@ impl FlightSim {
         let regions = load_regions("assets/regions.toml");
         let region = regions
             .iter()
-            .find(|r| r.name == "Maui")
+            .find(|r| r.name == "Tucson")
             .expect("no region");
         let world = World::load(renderer, region).expect("couldnt load region");
 
@@ -222,8 +224,8 @@ impl FlightSim {
         };
 
         let mut waypoints = vec![];
-        let depart_runway = sim.world.runway("PHMK 17").expect("no runway");
-        let arrive_runway = sim.world.runway("PHSF 09").expect("no runway");
+        let depart_runway = sim.world.runway("KTUS 04").expect("no runway");
+        let arrive_runway = sim.world.runway("KFHU 03").expect("no runway");
         waypoints.extend(sim.world.approach(arrive_runway));
         sim.route = Route::new(waypoints);
 
@@ -349,15 +351,7 @@ impl Scene for FlightSim {
             renderer.uniform(program, "u_origin").set_vec2(&origin);
         }
 
-        self.minimap.render(
-            renderer,
-            sea,
-            &self.plane,
-            &self.world.map,
-            &self.world,
-            &self.light,
-            &self.world.origin,
-        );
+        self.minimap.render(renderer, &self.plane, &self.world);
 
         let plane_model = self.plane.model_matrix(&self.world.origin);
 

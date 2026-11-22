@@ -73,6 +73,7 @@ fn draw_minimap(
 
     let dot = 0.25 * t.em;
 
+    // Draw the waypoints in a route
     renderer.push_clip(square);
     let mut prev = center;
     for (i, &d) in route.iter().enumerate() {
@@ -86,20 +87,7 @@ fn draw_minimap(
     }
     renderer.pop_clip();
 
-    // If the active waypoint is off the map, put a marker on the edge pointing at it
-    if let Some(&d) = route.first() {
-        let v = to_screen(d) - center;
-        let edge = (r - 0.6 * t.em) / v.x.abs().max(v.y.abs());
-        if edge < 1.0 {
-            let p = center + v * edge;
-            renderer.fill_rect(
-                Rectangle::new(p.x - 0.35 * t.em, p.y - 0.35 * t.em, 0.7 * t.em, 0.7 * t.em),
-                WAYPOINT,
-            );
-        }
-    }
-
-    // The plane is always pointing up
+    // Draw the plane as a little chevron guy
     let s = 0.55 * t.em;
     widgets::draw_outline(
         renderer,
@@ -113,7 +101,8 @@ fn draw_minimap(
         ACCENT,
     );
 
-    // North turns the opposite way to the plane
+    // Draw the north indicator
+    // TODO: A triangle would look better
     let north = vec2(-heading.sin(), -heading.cos()); // screen space, y down
     let n_pos = center + north * (r - 0.9 * t.em);
     renderer.fill_circle(n_pos, 0.75 * s, HALO);

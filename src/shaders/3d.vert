@@ -6,7 +6,6 @@ uniform mat4 u_light_mvp; // light's proj * view, only used when u_shadows != 0
 uniform float u_shadow_texel; // world-space size of one shadow-map texel
 uniform vec3 u_sun_dir; // direction towards the light
 uniform vec3 u_camera_pos;
-uniform int u_minimap; // 1 while drawing the minimap, no air between the camera and the ground
 
 layout(location = 0) in vec3 a_position;
 layout(location = 1) in vec3 a_normal;
@@ -61,11 +60,9 @@ void main() {
     v_haze_r = vec3(0.0);
     v_haze_m = vec3(0.0);
     v_haze_trans = vec3(1.0);
-    if (u_minimap == 0) {
-        vec3 view = curved.xyz - u_camera_pos;
-        float dist = length(view);
-        scatter_sums(u_camera_pos.y, view / dist, l, air_distance(dist), 6, v_haze_r, v_haze_m, v_haze_trans);
-    }
+    vec3 view = curved.xyz - u_camera_pos;
+    float dist = length(view);
+    scatter_sums(u_camera_pos.y, view / dist, l, air_distance(dist), 6, v_haze_r, v_haze_m, v_haze_trans);
 
     v_sun = sun_light(world_pos.y, l);
     vec3 unused;

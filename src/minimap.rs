@@ -1,22 +1,22 @@
 use apricot::{
-    camera::{floating_origin::FloatingOrigin, Camera, ProjectionKind},
+    camera::{Camera, ProjectionKind},
     error::Error,
-    opengl::DrawOptions,
-    render::{lighting::DirectionalLight, target::RenderTarget, RenderContext},
+    render::{assets::ProgramId, target::RenderTarget, RenderContext},
 };
-use nalgebra_glm::{vec3, vec4, Mat4, Vec3};
+use nalgebra_glm::{vec3, vec4, Vec3};
 
-use crate::{airplane::Airplane, heightmap::Heightmap, world::World};
+use crate::{airplane::Airplane, world::World};
 
 /// The map doesn't change all that much, only redraw it every this many frames to reduce lag
 const REDRAW_EVERY: u32 = 4;
 
-pub const MINIMAP_PX: u32 = 256;
+pub const MINIMAP_PX: u32 = 512;
 pub const MINIMAP_RANGE: f32 = 5_000.0; // meters from the plane to the edge of the map
 
 pub struct Minimap {
     pub minimap: RenderTarget,
-    minimap_light: DirectionalLight,
+    /// Draws the ground and sea in flat map colors
+    program: ProgramId,
     frame: u32,
 }
 
@@ -27,26 +27,21 @@ impl Minimap {
             .get_texture_from_id(minimap.texture)
             .set_smooth(true);
 
-        let mut minimap_light = DirectionalLight::new(light_dir, 1024)?;
-        minimap_light.frustum.shadow_distance = f32::MAX;
+        let program = renderer.add_program_from_source(
+            glsl!("shaders/map.vert"),
+            glsl!("shaders/terrain.glsl", "shaders/map.frag"),
+            None,
+        )?;
 
         Ok(Self {
             minimap,
-            minimap_light,
+            program,
             frame: 0,
         })
     }
 
-    pub fn render(
-        &mut self,
-        renderer: &RenderContext,
-        sea: Mat4,
-        plane: &Airplane,
-        map: &Heightmap,
-        world: &World,
-        old_light: &DirectionalLight,
-        origin: &FloatingOrigin,
-    ) {
+    /// Draw the map around `plane`, turned so it poitns up, with the sea placed by `sea`
+    pub fn render(&mut self, renderer: &RenderContext, plane: &Airplane, world: &World) {
         // Only draw every couple frames or so to reduce lag
         let due = self.frame % REDRAW_EVERY == 0;
         self.frame = self.frame.wrapping_add(1);
@@ -54,11 +49,13 @@ impl Minimap {
             return;
         }
 
+        // Look straight down, turned with the plane
         let h = plane.heading();
-        let pos = origin.relative(plane.pos);
+        let pos = world.origin.relative(plane.pos);
         let forward = vec3(h.sin(), 0.0, -h.cos()).cast();
+        let right = vec3(h.cos(), 0.0, h.sin()).cast(); // east when heading north
 
-        let top = map.max_height + 100.0;
+        let top = world.map.max_height + 100.0;
         let eye = vec3(pos.x, top, pos.z);
         let camera = Camera::new(
             eye,
@@ -77,31 +74,17 @@ impl Minimap {
         let main_camera = renderer.camera();
         renderer.set_camera(camera);
 
-        // Shadows over the map
-        renderer.set_light(Some(&self.minimap_light));
-        renderer.shadow_pass(&mut self.minimap_light, |pass| world.draw_shadows(pass));
+        // Setup hillshade light from top left
+        let light = (forward - right) * 0.5 + vec3(0.0, std::f32::consts::FRAC_1_SQRT_2, 0.0); // 45 degrees up
+        renderer
+            .uniform(self.program, "u_map_light")
+            .set_vec3(&light.normalize());
 
-        let p = renderer.builtins.program_3d;
-        let w = renderer
-            .get_program_id_from_name("water")
-            .expect("water program should be setup by main");
-        renderer.uniform(p, "u_minimap").set_i32(1);
-        renderer.uniform(w, "u_minimap").set_i32(1);
-
-        renderer.render_to_target(&self.minimap, vec4(0.05, 0.1, 0.2, 1.0), || {
-            world.draw_terrain(renderer);
-            renderer.draw_mesh_with_program(
-                w,
-                renderer.builtins.plane,
-                sea,
-                &DrawOptions::default(),
-            );
+        // Draw the terrain
+        renderer.render_to_target(&self.minimap, vec4(0.67, 0.83, 0.96, 1.0), || {
+            world.draw_terrain(renderer, self.program);
         });
 
-        // Cleanup
-        renderer.uniform(p, "u_minimap").set_i32(0);
-        renderer.uniform(w, "u_minimap").set_i32(0);
         renderer.set_camera(main_camera);
-        renderer.set_light(Some(old_light));
     }
 }

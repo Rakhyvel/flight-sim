@@ -1,0 +1,16 @@
+uniform mat4 u_model_matrix;
+uniform mat4 u_view_matrix;
+uniform mat4 u_proj_matrix;
+
+layout(location = 0) in vec3 a_position;
+layout(location = 2) in vec2 a_uv;
+
+out vec3 v_world_pos;
+out vec2 v_uv;
+
+void main() {
+    vec4 world_pos = u_model_matrix * vec4(a_position, 1.0);
+    v_world_pos = world_pos.xyz;
+    v_uv = a_uv;
+    gl_Position = u_proj_matrix * u_view_matrix * world_pos;
+}
