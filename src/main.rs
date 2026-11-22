@@ -58,7 +58,7 @@ const AIR_LUT_UNIT: u32 = 2;
 //     - [ ] c to free mouse orbit, and joystick hat
 //     - [ ] z to zoom in ON THE VELOCITY VECTOR not the plane
 // - [x] better worldgen model (like 100km, real maps, hawaii, denver)
-//     - [x] mini map
+//     - [ ] mini map that's stylized like a real map
 // - [ ] weather, wind, time of day
 //     - [x] distance haze, fog
 //     - [ ] Higher LOD shadow maps for the airplane, maybe cascading shadow maps
@@ -90,6 +90,7 @@ const AIR_LUT_UNIT: u32 = 2;
 //     - [ ] main menu that lists scenarios, using UI (move delta-horizon's UI to apricot?)
 //     - [ ] custom mission editor
 // - [ ] cockpit camera? idrc about this ngl
+// - [ ] ATIS readouts, maybe in a synthesized/phonetic voice? that'd be cool
 
 fn main() -> Result<(), Error> {
     run(
@@ -133,7 +134,7 @@ struct FlightSim {
     route: Route,
 }
 
-macro_rules! frag {
+macro_rules! glsl {
     ($($file:literal),+ $(,)?) => {
         concat!("#version 330 core\n", $(include_str!($file), "\n"),+)
     };
@@ -145,10 +146,11 @@ impl FlightSim {
 
         // Replace the default 3d shader with our super cool epic shader
         renderer.add_program_from_source(
-            include_str!("shaders/3d.vert"),
-            frag!(
+            glsl!("shaders/atmosphere.glsl", "shaders/3d.vert"),
+            glsl!(
                 "shaders/lighting.glsl",
                 "shaders/atmosphere.glsl",
+                "shaders/tonemap.glsl",
                 "shaders/noise.glsl",
                 "shaders/3d.frag",
             ),
@@ -156,13 +158,18 @@ impl FlightSim {
         )?;
         let sky_program = renderer.add_program_from_source(
             include_str!("shaders/sky.vert"),
-            frag!("shaders/atmosphere.glsl", "shaders/sky.frag",),
+            glsl!(
+                "shaders/atmosphere.glsl",
+                "shaders/tonemap.glsl",
+                "shaders/sky.frag",
+            ),
             Some("sky"),
         )?;
         let water_program = renderer.add_program_from_source(
-            include_str!("shaders/3d.vert"),
-            frag!(
+            glsl!("shaders/atmosphere.glsl", "shaders/3d.vert"),
+            glsl!(
                 "shaders/atmosphere.glsl",
+                "shaders/tonemap.glsl",
                 "shaders/lighting.glsl",
                 "shaders/noise.glsl",
                 "shaders/water.frag"
@@ -180,7 +187,7 @@ impl FlightSim {
                 .set_i32(AIR_LUT_UNIT as i32);
         }
 
-        let light_dir = vec3(0.5, 0.0, 0.0).normalize();
+        let light_dir = vec3(0.5, 0.3, 0.0).normalize();
         let mut light = DirectionalLight::new(light_dir, 2048)?;
         light.frustum.shadow_distance = 150.0;
         app.renderer.set_light(Some(&light));
@@ -188,7 +195,7 @@ impl FlightSim {
         let regions = load_regions("assets/regions.toml");
         let region = regions
             .iter()
-            .find(|r| r.name == "Maui")
+            .find(|r| r.name == "Denver")
             .expect("no region");
         let world = World::load(renderer, region).expect("couldnt load region");
 
@@ -218,8 +225,8 @@ impl FlightSim {
         };
 
         let mut waypoints = vec![];
-        let depart_runway = sim.world.runway("PHOG 02").expect("no runway");
-        let arrive_runway = sim.world.runway("PHKO 17").expect("no runway");
+        let depart_runway = sim.world.runway("KBJC 12L").expect("no runway");
+        let arrive_runway = sim.world.runway("KAPA 17L").expect("no runway");
         waypoints.extend(sim.world.approach(arrive_runway));
         sim.route = Route::new(waypoints);
 
@@ -367,7 +374,7 @@ impl Scene for FlightSim {
 
         renderer.clear(vec4(0.6, 0.8, 0.95, 1.0));
 
-        self.world.draw(renderer);
+        self.world.draw(renderer, self.plane.pos);
 
         // Draw the water
         renderer

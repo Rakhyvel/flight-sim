@@ -13,7 +13,6 @@ const float H_R = 8000.0; // Rayleigh scale height
 const float H_M = 1200.0; // Mie scale height
 const float MIE_G = 0.76; // How forward-scattering the haze is (the glow around the sun)
 const float SUN_INTENSITY = 20.0;
-const float EXPOSURE = 1.0;
 const vec3 WATER_BODY = vec3(0.004, 0.022, 0.035); // deep ocean, linear
 
 // Near and far distances where the ray hits a sphere of radius r at the origin. (-1, -1) on a miss
@@ -42,7 +41,7 @@ vec2 optical_depth_to_sun(vec3 p, vec3 sun) {
     float mu = dot(p, sun) / r;
     float v = sqrt(clamp((r - PLANET_R) / (ATMOS_R - PLANET_R), 0.0, 1.0));
     vec2 uv = (0.5 + vec2(mu * 0.5 + 0.5, v) * (AIR_LUT_SIZE - 1.0)) / AIR_LUT_SIZE; // so the ends land on texel centers
-    vec4 t = texture(u_air_lut, uv);
+    vec4 t = textureLod(u_air_lut, uv, 0.0); // explicit level, so it works in vertex shaders too
     const vec2 BYTES = vec2(65280.0, 255.0) / 65535.0; // high byte, low byte
     return vec2(dot(t.rg, BYTES), dot(t.ba, BYTES)) * AIR_LUT_MAX;
 }
@@ -60,9 +59,8 @@ vec3 sun_light(float alt, vec3 sun) {
     return SUN_INTENSITY * transmittance(optical_depth_to_sun(p, sun));
 }
 
-// Light scatted towards the eye along a ray from altitude `alt` in `dir`, for up to `max_dist`.
-// `trans` is how much of whatever's at the end of the ray still gets through
-vec3 scatter(float alt, vec3 dir, vec3 sun, float max_dist, int steps, out vec3 trans) {
+// Light scattered toward the eye along a ray, before the sun's direction is taken into account, as (rayleight, mie).
+void scatter_sums(float alt, vec3 dir, vec3 sun, float max_dist, int steps, out vec3 sum_r, out vec3 sum_m, out vec3 trans) {
     vec3 ro = vec3(0.0, PLANET_R + max(alt, 1.0), 0.0);
     float t_end = ray_sphere(ro, dir, ATMOS_R).y;
     float ground = ray_sphere(ro, dir, PLANET_R).x;
@@ -72,8 +70,9 @@ vec3 scatter(float alt, vec3 dir, vec3 sun, float max_dist, int steps, out vec3 
     t_end = min(t_end, max_dist);
 
     trans = vec3(1.0);
-    vec3 sum_r = vec3(0.0);
-    vec3 sum_m = vec3(0.0);
+    sum_r = vec3(0.0);
+    sum_m = vec3(0.0);
+
     float t_prev = 0.0;
     for (int i = 0; i < steps; i++) {
         float u = float(i + 1) / float(steps);
@@ -95,8 +94,20 @@ vec3 scatter(float alt, vec3 dir, vec3 sun, float max_dist, int steps, out vec3 
         }
         trans *= step_trans;
     }
+}
+
+// The light from `scatter_sums`, seen looking along `dir`
+vec3 scatter_light(vec3 sum_r, vec3 sum_m, vec3 dir, vec3 sun) {
     float mu = dot(dir, sun);
     return SUN_INTENSITY * (sum_r * BETA_R * phase_rayleigh(mu) + sum_m * BETA_M * phase_mie(mu));
+}
+
+// Light scatted towards the eye along a ray from altitude `alt` in `dir`, for up to `max_dist`.
+// `trans` is how much of whatever's at the end of the ray still gets through
+vec3 scatter(float alt, vec3 dir, vec3 sun, float max_dist, int steps, out vec3 trans) {
+    vec3 sum_r, sum_m;
+    scatter_sums(alt, dir, sun, max_dist, steps, sum_r, sum_m, trans);
+    return scatter_light(sum_r, sum_m, dir, sun);
 }
 
 // draw the great deep beyond, so that the horizon looks right
@@ -119,13 +130,4 @@ vec3 sea_beyond(float alt, vec3 dir, vec3 sun) {
     vec3 body = WATER_BODY / PI * sun_light(0.0, sun) * max(sun.y, 0.0);
     float fresnel = 0.02 + 0.98 * pow(1.0 - sin_graze, 5.0);
     return mix(body, sky_refl, fresnel);
-}
-
-// Convert linear HDR to display, use ACES curve cause it looks cool
-vec3 tonemap(vec3 c) {
-    c *= EXPOSURE;
-    c = clamp((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0);
-    c = pow(c, vec3(1.0 / 2.2));
-    float n = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
-    return c + (n - 0.5) / 255.0;
 }

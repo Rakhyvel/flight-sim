@@ -5,6 +5,10 @@ uniform int u_minimap; // 1 while drawing the minimap, no air between the camera
 uniform vec2 u_origin;
 
 in vec3 v_world_pos;
+
+in vec3 v_sun;
+in vec3 v_sky_up;
+
 out vec4 color;
 
 const float CAMERA_FAR = 150000.0; // keep up to date!
@@ -83,9 +87,7 @@ void main() {
     vec3 sky_refl = scatter(0.0, r, l, 1e12, 6, unused);
 
     // Light coming back up out of the water
-    vec3 sun = sun_light(0.0, l);
-    vec3 sky_up = scatter(0.0, vec3(0.0, 1.0, 0.0), l, 1e12, 4, unused);
-    vec3 body = WATER_BODY / PI * (sun * max(l.y, 0.0) + sky_up * PI);
+    vec3 body = WATER_BODY / PI * (v_sun * max(l.y, 0.0) + v_sky_up * PI);
 
     // Sun glint
     float rough = 0.02 * 0.15 + filtered;
@@ -93,7 +95,7 @@ void main() {
     vec3 h = normalize(l - v);
     float f_h = 0.02 + 0.98 * pow(1.0 - max(dot(l, h), 0.0), 5.0);
     float spec = (shininess + 8.0) / (8.0 * PI) * pow(max(dot(n, h), 0.0), shininess);
-    vec3 glint = sun * spec * f_h * max(dot(n, l), 0.0) * shadow_visibility();
+    vec3 glint = v_sun * spec * f_h * max(dot(n, l), 0.0) * shadow_visibility();
 
     vec3 water = mix(body, sky_refl, fresnel) + glint;
 

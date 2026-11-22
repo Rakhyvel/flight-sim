@@ -17,7 +17,7 @@ use crate::{
     heightmap::Heightmap,
     region::Region,
     runway_model, terrain_color,
-    tiles::{Tile, TileTree, TILE_QUADS},
+    tiles::{Tile, TileHeights, TileTree, TILE_QUADS},
     waypoint::{Waypoint, WaypointKind},
 };
 
@@ -26,10 +26,18 @@ const EDGE_INSET: f64 = 200.0;
 
 /// How far terrain is drawn [m]
 pub const RENDER_DISTANCE: f64 = 150_000.0;
+/// Runways farther than this are not drawn [m]
+const RUNWAY_DRAW_DISTANCE: f64 = 25_000.0;
 /// Level of the biggest tiles. 6 is 4096 cells, about 123 km at 30 m spacing
 const ROOT_LEVEL: u32 = 6;
-/// Split a tile when it's closer than this many times its size
-const SPLIT: f64 = 2.0;
+/// Never split a tile farther than this many times its size
+const SPLIT: f64 = 1.5;
+/// Always split a tile closer than this many times its size, for texture detail
+const TEXTURE_SPLIT: f64 = 0.5;
+/// Split a tile when its shape would be off by more than this [px]
+const MAX_ERROR_PX: f64 = 2.0;
+/// Roughly a 1400 px tall screen at a 45 degree field of view
+const PIXELS_PER_RADIAN: f64 = 1400.0 / 0.785;
 /// How far the skirts hang down below each chunk's edge [m]
 const SKIRT_PER_STEP: f32 = 20.0;
 /// Off the map the ground sinks under the sea, so the edge just looks like more ocean
@@ -72,7 +80,11 @@ impl World {
             map_cells: (w as u32, d as u32),
             spacing: (map.geo.spacing_x, map.geo.spacing_z),
             split: SPLIT,
+            texture_split: TEXTURE_SPLIT,
             max_distance: RENDER_DISTANCE,
+            heights: TileHeights::new(w as u32, d as u32, ROOT_LEVEL, |x, z| map.sample(x, z)),
+            max_error_px: MAX_ERROR_PX,
+            pixels_per_radian: PIXELS_PER_RADIAN,
         };
 
         // Load the airports and navaids
@@ -282,7 +294,7 @@ impl World {
         self.drawn.draw_shadows(pass);
     }
 
-    pub fn draw(&self, renderer: &RenderContext) {
+    pub fn draw(&self, renderer: &RenderContext, camera: DVec3) {
         let p = renderer.builtins.program_3d;
 
         // Draw runways
@@ -296,6 +308,10 @@ impl World {
         };
         let white = renderer.builtins.white_texture;
         for &(anchor, surface, marks) in &self.runway_meshes {
+            let offset = anchor - camera;
+            if offset.x.hypot(offset.z) > RUNWAY_DRAW_DISTANCE {
+                continue;
+            }
             let model = self.origin.transform(anchor, Mat4::identity());
             renderer.draw_mesh_textured_with(
                 surface,

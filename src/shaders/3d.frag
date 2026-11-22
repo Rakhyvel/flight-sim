@@ -10,15 +10,14 @@ in vec3 v_normal;
 in vec2 v_uv;
 in vec3 v_world_pos;
 
+in vec3 v_sun;
+in vec3 v_sky_up;
+
+in vec3 v_haze_r; // haze between here and the camera
+in vec3 v_haze_m; // mie
+in vec3 v_haze_trans; // how much of the surface shows through it
+
 out vec4 color;
-
-const float CAMERA_FAR = 150000.0; // keep in sync with main.rs
-
-// How much air lies between the camera and a point `dist` away
-float air_distance(float dist) {
-    float edge = smoothstep(0.7 * CAMERA_FAR, CAMERA_FAR, dist);
-    return dist / max(1.0 - edge, 1e-4);
-}
 
 float ground_detail(vec2 p) {
     float footprint = length(fwidth(p));
@@ -28,6 +27,7 @@ float ground_detail(vec2 p) {
     float freq = 1.0 / 8.0;
     for (int i = 0; i < 4; i++) {
         float keep = 1.0 - smoothstep(0.25, 1.0, freq * footprint);
+        if (keep <= 0.0) break; // every octave after this is finer still
         d += (value_noise(p * freq) - 0.5) * amp * keep;
         p = TURN * p + vec2(31.7, -17.3);
         freq *= 2.3;
@@ -37,6 +37,12 @@ float ground_detail(vec2 p) {
 }
 
 void main() {
+    // unda da sea
+    if (u_detail > 0.5 && v_world_pos.y < -1.0) {
+        color = vec4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
+
     vec3 n = normalize(v_normal);
     vec3 l = normalize(u_sun_dir);
 
@@ -45,25 +51,16 @@ void main() {
     albedo *= 1.0 + 0.6 * ground_detail(v_world_pos.xz + u_origin) * u_detail;
 
     // Direct sun, colored by the atmosphere
-    vec3 sun = sun_light(v_world_pos.y, l);
     float diffuse = max(dot(n, l), 0.0) * shadow_visibility();
 
     // Sky light
-    vec3 unused;
-    vec3 sky_up = scatter(v_world_pos.y, vec3(0.0, 1.0, 0.0), l, 1e12, 4, unused);
-    vec3 skylight = sky_up * PI * (0.6 + 0.4 * n.y);
+    vec3 skylight = v_sky_up * PI * (0.6 + 0.4 * n.y);
 
-    vec3 lit = albedo / PI * (sun * diffuse + skylight);
+    vec3 lit = albedo / PI * (v_sun * diffuse + skylight);
 
     // Dim far away surfaces and add air
-    vec3 trans = vec3(1.0);
-    vec3 inscatter = vec3(0.0);
-    if (u_minimap == 0) {
-        vec3 view = v_world_pos - u_camera_pos;
-        view.y -= dot(view.xz, view.xz) / (2.0 * PLANET_R);
-        float dist = length(view);
-        inscatter = scatter(u_camera_pos.y, view / dist, l, air_distance(dist), 8, trans);
-    }
+    vec3 view_dir = normalize(v_world_pos - u_camera_pos); // flat is close enough for the sun's glow
+    vec3 inscatter = scatter_light(v_haze_r, v_haze_m, view_dir, l);
 
-    color = vec4(tonemap(lit * trans + inscatter), base.a);
+    color = vec4(tonemap(lit * v_haze_trans + inscatter), base.a);
 }
