@@ -166,7 +166,7 @@ impl AirplaneConfig {
                 );
             }
         }
-        Ok(toml::from_str(&std::fs::read_to_string(path)?)?)
+        Ok(config)
     }
 
     /// How far the bottom of the lowest wheel is below the center of gravity [m]

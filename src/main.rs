@@ -16,9 +16,16 @@ use apricot::{
 use nalgebra_glm::{vec2, vec3, vec4, Mat4};
 
 use crate::{
-    airplane::Airplane, config::AirplaneConfig, control::Controls, engine_sound::EngineSound,
-    flight_data::FlightData, hud::Hud, minimap::Minimap, region::load_regions, waypoint::Route,
-    world::World,
+    airplane::Airplane,
+    config::AirplaneConfig,
+    control::Controls,
+    engine_sound::EngineSound,
+    flight_data::FlightData,
+    hud::Hud,
+    minimap::Minimap,
+    region::load_regions,
+    waypoint::Route,
+    world::{World, RENDER_DISTANCE},
 };
 
 mod airplane;
@@ -34,19 +41,19 @@ mod plane_model;
 mod region;
 mod runway_model;
 mod terrain_color;
+mod tiles;
 mod waypoint;
 mod world;
 
-const CAMERA_FAR: f32 = 60_000.0;
-const LOADS_PER_FRAME: usize = 2;
+const LOADS_PER_FRAME: usize = 4;
 
 // todo:
 // - [x] good aero model
 // - [x] joystick
 // - [x] better plane model
 //     - [ ] c to free mouse orbit
-//     - [ ] z to zoom in
-// - [ ] better worldgen model (like 100km, real maps, hawaii, denver)
+//     - [ ] z to zoom in ON THE VELOCITY VECTOR not the plane
+// - [x] better worldgen model (like 100km, real maps, hawaii, denver)
 //     - [x] mini map
 // - [ ] weather, wind, time of day
 //     - [x] distance haze, fog
@@ -61,18 +68,20 @@ const LOADS_PER_FRAME: usize = 2;
 //     - [ ] control surface deflection? wing flex?
 // - [ ] camera jitter and g-force lag
 // - [x] water/ground collision
-// - [ ] flaps, gear, slats, aerobrakes, whatever
+// - [x] flaps, gear, slats, aerobrakes, whatever
 //     - [ ] stall horn for the cessna
 //     - [ ] g limits
 // - [ ] landing, airports
-//     - [ ] probably requires RK4 for wheel springs
 //     - [ ] ground effect
-//     - [ ] gotta make sure the camera doesn't clip into the ground
 // - [ ] different planes (172, pa-28, cub, otter, citation, 737-200)
+//      - [x] load these from tomls
+//      - [ ] actual .obj meshes and textures
 //      - [ ] do actual engine/prop models, move rpm calc from front-end to engine backend
-// - [ ] wet mass, cargo mass
-// - [ ] waypoints, IFR, ATC call outs? flight plans?
-// - [ ] contracts (cargo, passengers, sightseeing, firefighting, bush rescue, skydiving, banner dragging)
+// - [ ] fuel, wet mass, cargo mass
+// - [x] waypoints, IFR, ATC call outs? flight plans?
+// - [ ] missions/scenarios
+//     - [ ] load from toml, title, have desc, region, plane load out, waypoints, and landing objectives
+//     - [ ] main menu that lists scenarios, using UI (move delta-horizon's UI to apricot?)
 // - [ ] cockpit camera? idrc about this ngl
 
 fn main() -> Result<(), Error> {
@@ -161,7 +170,7 @@ impl FlightSim {
         let regions = load_regions("assets/regions.toml");
         let region = regions
             .iter()
-            .find(|r| r.name == "Denver")
+            .find(|r| r.name == "Maui")
             .expect("no region");
         let world = World::load(renderer, region).expect("couldnt load region");
 
@@ -181,7 +190,7 @@ impl FlightSim {
             hud: Hud::new(&app.renderer)?,
             minimap: Minimap::new(&app.renderer, light_dir)?,
             water_program,
-            sea_mesh: renderer.add_mesh_data(sea_grid(64), None),
+            sea_mesh: renderer.add_mesh_data(sea_grid(128), None),
             plane: Airplane::new(
                 AirplaneConfig::load("assets/planes/dash8.toml").expect("should exist"),
             ),
@@ -190,8 +199,8 @@ impl FlightSim {
         };
 
         let mut waypoints = vec![];
-        let depart_runway = sim.world.runway("KBJC 12L").expect("no runway");
-        let arrive_runway = sim.world.runway("KAPA 17L").expect("no runway");
+        let depart_runway = sim.world.runway("PHOG 02").expect("no runway");
+        let arrive_runway = sim.world.runway("PHKO 17").expect("no runway");
         waypoints.extend(sim.world.approach(arrive_runway));
         sim.route = Route::new(waypoints);
 
@@ -285,7 +294,7 @@ impl Scene for FlightSim {
             ProjectionKind::Perspective {
                 fov_rad: self.fov,
                 near: 3.0,
-                far: CAMERA_FAR,
+                far: RENDER_DISTANCE as f32,
             },
         );
 
@@ -296,7 +305,7 @@ impl Scene for FlightSim {
     fn render(&mut self, app: &App) {
         let renderer = &app.renderer;
 
-        let sea_size = 2.0 * CAMERA_FAR;
+        let sea_size = 2.0 * RENDER_DISTANCE as f32;
         let plane_pos = self.world.origin.relative(self.plane.pos);
         let sea: Mat4 = nalgebra_glm::scale(
             &nalgebra_glm::translation(&vec3(plane_pos.x, 0.0, plane_pos.z)),
@@ -316,7 +325,7 @@ impl Scene for FlightSim {
             sea,
             &self.plane,
             &self.world.map,
-            &self.world.chunks,
+            &self.world.drawn,
             &self.light,
             &self.world.origin,
         );

@@ -5,10 +5,10 @@ use std::{
 
 use apricot::{
     camera::floating_origin::FloatingOrigin,
+    geometry::aabb::AABB,
     model_set::{Model, ModelSet},
     opengl::DrawOptions,
-    render::{self, assets::MeshId, lighting::ShadowPass, RenderContext},
-    terrain::chunks::{ChunkCoord, ChunkGrid},
+    render::{assets::MeshId, lighting::ShadowPass, RenderContext},
 };
 use nalgebra_glm::{vec3, vec4, DVec2, DVec3, Mat4, Vec3};
 
@@ -17,43 +17,63 @@ use crate::{
     heightmap::Heightmap,
     region::Region,
     runway_model, terrain_color,
+    tiles::{Tile, TileTree, TILE_QUADS},
     waypoint::{Waypoint, WaypointKind},
 };
 
-const CHUNK_CELLS: u32 = 64;
-const LOAD_RADIUS: i32 = 32;
 /// How far a runway has to be from the edge of the map to be used [m]
 const EDGE_INSET: f64 = 200.0;
-/// How detailed chunks are by distance, (distance, step)
-const LODS: [(i32, u32); 4] = [(4, 1), (8, 2), (16, 4), (24, 8)];
-/// Step for everything past the last LOD ring
-const FARTHEST_STEP: u32 = 16;
+
+/// How far terrain is drawn [m]
+pub const RENDER_DISTANCE: f64 = 150_000.0;
+/// Level of the biggest tiles. 6 is 4096 cells, about 123 km at 30 m spacing
+const ROOT_LEVEL: u32 = 6;
+/// Split a tile when it's closer than this many times its size
+const SPLIT: f64 = 2.0;
 /// How far the skirts hang down below each chunk's edge [m]
 const SKIRT_PER_STEP: f32 = 20.0;
+/// Off the map the ground sinks under the sea, so the edge just looks like more ocean
+const OFF_MAP_HEIGHT: f32 = -100.0;
+/// The most the earth's curve lowers anything drawn [m]
+const MAX_CURVE_DROP: f32 = (RENDER_DISTANCE * RENDER_DISTANCE / (2.0 * 6_371_000.0)) as f32;
 
 /// The origin snaps to multiples of this [m] so it's a whole number and exact even in f32
 const ORIGIN_SNAP: f64 = 1024.0;
 const RECENTER_DISTANCE: f64 = 2048.0;
 
 pub struct World {
-    pub map: Heightmap,
     pub runways: Vec<Runway>,
     /// Where each runway's meshes are anchored, and its asphalt and markings
     runway_meshes: Vec<(DVec3, MeshId, MeshId)>,
-    chunk_grid: ChunkGrid,
-    pub chunks: ModelSet<ChunkCoord>,
-    /// The vertex spacing each loaded chunk was built with
-    chunk_steps: HashMap<ChunkCoord, u32>,
-    /// Everything is drawn relative to this
-    pub origin: FloatingOrigin,
     /// Every airport and navaid on the map
     pub waypoints: Vec<Waypoint>,
+
+    pub map: Heightmap,
+    /// Which tiles to draw
+    tree: TileTree,
+    /// Every built tile, drawn or not
+    tiles: HashMap<Tile, Model>,
+    /// The tiles being drawn this frame
+    pub drawn: ModelSet<Tile>,
+
+    /// Everything is drawn relative to this
+    pub origin: FloatingOrigin,
 }
 
 impl World {
     pub fn load(renderer: &RenderContext, region: &Region) -> Result<Self, Box<dyn Error>> {
         // Load the map
         let mut map = Heightmap::load_geotiff(&format!("assets/{}", region.tiff))?;
+
+        // Load the tiles
+        let (w, d) = map.size();
+        let tree = TileTree {
+            root_level: ROOT_LEVEL,
+            map_cells: (w as u32, d as u32),
+            spacing: (map.geo.spacing_x, map.geo.spacing_z),
+            split: SPLIT,
+            max_distance: RENDER_DISTANCE,
+        };
 
         // Load the airports and navaids
         let on_map = |lat: f64, lon: f64| map.contains_lat_lon(lat, lon, 0.0);
@@ -121,14 +141,14 @@ impl World {
             .collect();
 
         Ok(Self {
-            map,
             runways,
             runway_meshes,
-            chunk_steps: HashMap::new(),
-            chunk_grid: ChunkGrid::new(CHUNK_CELLS),
-            chunks: ModelSet::new(),
-            origin: FloatingOrigin::default(),
             waypoints,
+            map,
+            tree,
+            tiles: HashMap::new(),
+            drawn: ModelSet::new(),
+            origin: FloatingOrigin::default(),
         })
     }
 
@@ -160,99 +180,106 @@ impl World {
         self.origin.pos = DVec3::new(snap(pos.x), 0.0, snap(pos.z));
 
         let moved: Vec<_> = self
-            .chunks
+            .drawn
             .iter()
-            .map(|(k, _)| (k, self.chunk_transform(k)))
+            .map(|(k, _)| (k, self.tile_transform(k)))
             .collect();
         for (k, transform) in moved {
-            self.chunks.set_transform(k, transform);
+            self.drawn.set_transform(k, transform);
         }
     }
 
-    fn chunk_transform(&self, chunk: ChunkCoord) -> Mat4 {
-        let o = self.chunk_grid.origin(chunk); // in cells, whole numbers
+    fn tile_transform(&self, tile: Tile) -> Mat4 {
+        let (ox, oz) = tile.origin();
         let corner = DVec3::new(
-            o.x as f64 * self.map.geo.spacing_x,
+            ox as f64 * self.map.geo.spacing_x,
             0.0,
-            o.z as f64 * self.map.geo.spacing_z,
+            oz as f64 * self.map.geo.spacing_z,
         );
         let scale = nalgebra_glm::scaling(&vec3(self.map.spacing_x, 1.0, self.map.spacing_z));
         self.origin.transform(corner, scale)
     }
 
-    /// Stream terrain chunks around `pos`, building at most `max_loads` of them
+    fn build_tile(&self, renderer: &RenderContext, tile: Tile) -> Model {
+        let (ox, oz) = tile.origin();
+        let map = &self.map;
+        let (w, d) = map.size();
+        let height = |x: f32, z: f32| {
+            let (gx, gz) = (ox + x as i32, oz + z as i32);
+            if gx < 0 || gz < 0 || gx as usize >= w || gz as usize >= d {
+                OFF_MAP_HEIGHT
+            } else {
+                map.sample(gx, gz)
+            }
+        };
+
+        let (n, step) = (tile.cells(), tile.step());
+        let mesh = apricot::terrain::mesh_smooth(n, n, step, SKIRT_PER_STEP * step as f32, height);
+        let mesh = renderer.add_mesh_data(mesh, None);
+
+        let pixels = terrain_color::tile_texture(map, ox, oz, step, TILE_QUADS);
+        let texture = renderer.create_texture_rgba(TILE_QUADS, TILE_QUADS, &pixels);
+        renderer.get_texture_from_id(texture).set_smooth(true);
+
+        Model::new(mesh, texture, self.tile_transform(tile))
+    }
+
+    /// Stream terrain tiles around `pos`, building at most `max_loads` of them
     pub fn update(&mut self, renderer: &RenderContext, pos: DVec3, max_loads: usize) {
-        let (sx, sz) = (self.map.geo.spacing_x, self.map.geo.spacing_z);
-        let cell_pos: Vec3 = vec3((pos.x / sx) as f32, 0.0, (pos.z / sz) as f32);
-        let here = self.chunk_grid.chunk_at(cell_pos);
-
-        let (w, d) = self.map.size();
-        let max_cx = (w as u32).div_ceil(CHUNK_CELLS) as i32;
-        let max_cz = (d as u32).div_ceil(CHUNK_CELLS) as i32;
-
-        // Every chunk on the map in range, closest first, and how detailed it should be
-        let wanted: Vec<(ChunkCoord, u32)> = self
-            .chunk_grid
-            .chunks_near(cell_pos, LOAD_RADIUS)
-            .into_iter()
-            .filter(|c| c.x >= 0 && c.z >= 0 && c.x < max_cx && c.z < max_cz)
-            .map(|c| (c, lod_step(c.x - here.x, c.z - here.z)))
+        // Build what's missing, closest first
+        let ideal = self.tree.ideal(pos);
+        let todo: Vec<Tile> = ideal
+            .iter()
+            .copied()
+            .filter(|t| !self.tiles.contains_key(t))
+            .take(max_loads)
             .collect();
-        let in_range: HashSet<ChunkCoord> = wanted.iter().map(|&(c, _)| c).collect();
+        for tile in todo {
+            let model = self.build_tile(renderer, tile);
+            self.tiles.insert(tile, model);
+        }
 
-        // Unload anything that's dropped out of range
-        let stale: Vec<ChunkCoord> = self
-            .chunks
+        // Draw the best of what's built
+        let draw = self.tree.drawable(pos, |t| self.tiles.contains_key(&t));
+        let draw_set: HashSet<Tile> = draw.iter().copied().collect();
+
+        let hide: Vec<Tile> = self
+            .drawn
             .iter()
             .map(|(k, _)| k)
-            .filter(|k| !in_range.contains(k))
+            .filter(|k| !draw_set.contains(k))
             .collect();
-        for k in stale {
-            if let Some(model) = self.chunks.remove(k) {
+        for tile in hide {
+            self.drawn.remove(tile);
+        }
+        for &tile in &draw {
+            if self.drawn.get(tile).is_none() {
+                let mut model = self.tiles[&tile];
+                model.transform = self.tile_transform(tile); // the origin may have moved since it was built
+                let mut bounds: AABB = renderer.get_mesh_aabb(model.mesh);
+                bounds.min.y -= MAX_CURVE_DROP;
+                self.drawn.insert_with_box(tile, model, bounds);
+            }
+        }
+
+        // Free tiles that are neither wanted nor standing in for one
+        let keep: HashSet<Tile> = ideal.into_iter().chain(draw).collect();
+        let unused: Vec<Tile> = self
+            .tiles
+            .keys()
+            .copied()
+            .filter(|t| !keep.contains(t))
+            .collect();
+        for tile in unused {
+            if let Some(model) = self.tiles.remove(&tile) {
                 renderer.unload_mesh(model.mesh);
                 renderer.unload_texture(model.texture);
             }
-            self.chunk_steps.remove(&k);
-        }
-
-        // Build missing chunks and rebuild ones at the wrong detail
-        let todo: Vec<(ChunkCoord, u32)> = wanted
-            .into_iter()
-            .filter(|(c, step)| self.chunk_steps.get(c) != Some(step)) // get the closest first
-            .take(max_loads) // only take a few to prevent lag
-            .collect();
-
-        let map = &self.map; // borrow just the map, so the closure doesn't borrow all of self
-        for (chunk, step) in todo {
-            let mesh =
-                self.chunk_grid
-                    .mesh_smooth(chunk, step, SKIRT_PER_STEP * step as f32, |x, z| {
-                        map.sample(x as i32, z as i32)
-                    });
-            let mesh_id = renderer.add_mesh_data(mesh, None);
-
-            let texture = match self.chunks.remove(chunk) {
-                Some(old) => {
-                    renderer.unload_mesh(old.mesh);
-                    old.texture
-                }
-                None => {
-                    let pixels = terrain_color::chunk_texture(map, &self.chunk_grid, chunk);
-                    let texture = renderer.create_texture_rgba(CHUNK_CELLS, CHUNK_CELLS, &pixels);
-                    renderer.get_texture_from_id(texture).set_smooth(true);
-                    texture
-                }
-            };
-
-            let transform = self.chunk_transform(chunk);
-            self.chunks
-                .insert(renderer, chunk, Model::new(mesh_id, texture, transform));
-            self.chunk_steps.insert(chunk, step);
         }
     }
 
     pub fn draw_shadows(&self, pass: &ShadowPass) {
-        self.chunks.draw_shadows(pass);
+        self.drawn.draw_shadows(pass);
     }
 
     pub fn draw(&self, renderer: &RenderContext) {
@@ -260,7 +287,7 @@ impl World {
 
         // Draw terrain
         renderer.uniform(p, "u_detail").set_f32(1.0);
-        self.chunks.draw(renderer);
+        self.drawn.draw(renderer);
         renderer.uniform(p, "u_detail").set_f32(0.0);
 
         // Draw runways
@@ -325,15 +352,4 @@ impl World {
             fix("IAF", 0.0, THRESHOLD_CROSSING_HEIGHT),
         ]
     }
-}
-
-fn lod_step(dx: i32, dz: i32) -> u32 {
-    // Amir: You write "I love you so much, Lod"
-    // Jake: I do. I love her so much.
-    // Amir: She says nothing.
-    // Jake: Didn't have to.
-    let dist_sq = dx * dx + dz * dz;
-    LODS.iter()
-        .find(|&&(dist, _)| dist_sq < dist * dist)
-        .map_or(FARTHEST_STEP, |&(_, step)| step)
 }

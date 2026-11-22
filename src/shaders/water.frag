@@ -7,7 +7,7 @@ uniform vec2 u_origin;
 in vec3 v_world_pos;
 out vec4 color;
 
-const float CAMERA_FAR = 60000.0; // keep up to date!
+const float CAMERA_FAR = 150000.0; // keep up to date!
 
 const vec2 WIND_DIR = vec2(0.944, 0.330);
 const float CHOP = 0.7;

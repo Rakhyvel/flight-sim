@@ -4,11 +4,10 @@ use apricot::{
     model_set::ModelSet,
     opengl::DrawOptions,
     render::{lighting::DirectionalLight, target::RenderTarget, RenderContext},
-    terrain::chunks::ChunkCoord,
 };
 use nalgebra_glm::{vec3, vec4, Mat4, Vec3};
 
-use crate::{airplane::Airplane, heightmap::Heightmap};
+use crate::{airplane::Airplane, heightmap::Heightmap, tiles::Tile};
 
 /// The map doesn't change all that much, only redraw it every this many frames to reduce lag
 const REDRAW_EVERY: u32 = 4;
@@ -45,7 +44,7 @@ impl Minimap {
         sea: Mat4,
         plane: &Airplane,
         map: &Heightmap,
-        chunks: &ModelSet<ChunkCoord>,
+        tiles: &ModelSet<Tile>,
         old_light: &DirectionalLight,
         origin: &FloatingOrigin,
     ) {
@@ -81,7 +80,7 @@ impl Minimap {
 
         // Shadows over the map
         renderer.set_light(Some(&self.minimap_light));
-        renderer.shadow_pass(&mut self.minimap_light, |pass| chunks.draw_shadows(pass));
+        renderer.shadow_pass(&mut self.minimap_light, |pass| tiles.draw_shadows(pass));
 
         let p = renderer.builtins.program_3d;
         let w = renderer
@@ -92,7 +91,7 @@ impl Minimap {
 
         renderer.render_to_target(&self.minimap, vec4(0.05, 0.1, 0.2, 1.0), || {
             renderer.uniform(p, "u_detail").set_f32(1.0);
-            chunks.draw(renderer);
+            tiles.draw(renderer);
             renderer.uniform(p, "u_detail").set_f32(0.0);
             renderer.draw_mesh_with_program(
                 w,

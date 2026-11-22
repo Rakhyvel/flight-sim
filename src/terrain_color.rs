@@ -1,10 +1,7 @@
 //! Terrain colors: sand at the shore, green to sage grass inland, gray stone where it's high and steep.
 //! Shading comes from the 3D shader, so these are flat base colors
 
-use apricot::terrain::{
-    chunks::{ChunkCoord, ChunkGrid},
-    noise::value_noise,
-};
+use apricot::terrain::noise::value_noise;
 use nalgebra_glm::Vec3;
 
 use crate::heightmap::Heightmap;
@@ -25,16 +22,13 @@ const SAND_FADE: f32 = 20.0;
 const TREELINE: f32 = 1800.0;
 const SNOWLINE: f32 = 2800.0;
 
-/// RGBA pixels for one chunk, one texel per cell, rows along +Z
-pub fn chunk_texture(map: &Heightmap, grid: &ChunkGrid, chunk: ChunkCoord) -> Vec<u8> {
-    let o = grid.origin(chunk);
-    let (x0, z0) = (o.x as i32, o.z as i32);
-    let n = grid.chunk_cells as i32;
-
+/// RGBA pixels for a tile, `n` x `n` texels, one every `step` cells, starting at cell (x0, z0)
+pub fn tile_texture(map: &Heightmap, x0: i32, z0: i32, step: u32, n: u32) -> Vec<u8> {
+    let step = step as i32;
     let mut pixels = Vec::with_capacity((n * n * 4) as usize);
-    for z in 0..n {
-        for x in 0..n {
-            let c = terrain_albedo(map, x0 + x, z0 + z);
+    for z in 0..n as i32 {
+        for x in 0..n as i32 {
+            let c = terrain_albedo(map, x0 + x * step, z0 + z * step);
             let srgb = |v: f32| (v.clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0).round() as u8;
             pixels.extend_from_slice(&[srgb(c.x), srgb(c.y), srgb(c.z), 255]);
         }
