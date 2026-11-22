@@ -6,6 +6,7 @@ use apricot::{
     camera::{Camera, ProjectionKind},
     error::Error,
     input::Scancode,
+    mesh::MeshData,
     opengl::DrawOptions,
     render::{
         assets::{MeshId, ProgramId},
@@ -88,6 +89,7 @@ struct FlightSim {
     light: DirectionalLight,
 
     water_program: ProgramId,
+    sea_mesh: MeshId,
 
     world: World,
 
@@ -151,7 +153,7 @@ impl FlightSim {
             Some("water"),
         )?;
 
-        let light_dir = vec3(0.5, 0.8, 0.0).normalize();
+        let light_dir = vec3(0.5, 0.01, 0.0).normalize();
         let mut light = DirectionalLight::new(light_dir, 2048)?;
         light.frustum.shadow_distance = 150.0;
         app.renderer.set_light(Some(&light));
@@ -159,7 +161,7 @@ impl FlightSim {
         let regions = load_regions("assets/regions.toml");
         let region = regions
             .iter()
-            .find(|r| r.name == "Tucson")
+            .find(|r| r.name == "Denver")
             .expect("no region");
         let world = World::load(renderer, region).expect("couldnt load region");
 
@@ -179,6 +181,7 @@ impl FlightSim {
             hud: Hud::new(&app.renderer)?,
             minimap: Minimap::new(&app.renderer, light_dir)?,
             water_program,
+            sea_mesh: renderer.add_mesh_data(sea_grid(64), None),
             plane: Airplane::new(
                 AirplaneConfig::load("assets/planes/dash8.toml").expect("should exist"),
             ),
@@ -187,8 +190,8 @@ impl FlightSim {
         };
 
         let mut waypoints = vec![];
-        let depart_runway = sim.world.runway("KTUS 04").expect("no runway");
-        let arrive_runway = sim.world.runway("KRYN 06L").expect("no runway");
+        let depart_runway = sim.world.runway("KBJC 12L").expect("no runway");
+        let arrive_runway = sim.world.runway("KAPA 17L").expect("no runway");
         waypoints.extend(sim.world.approach(arrive_runway));
         sim.route = Route::new(waypoints);
 
@@ -343,7 +346,7 @@ impl Scene for FlightSim {
             .set_f32((app.seconds % 1000.0) as f32);
         renderer.draw_mesh_with_program(
             self.water_program,
-            renderer.builtins.plane,
+            self.sea_mesh,
             sea,
             &DrawOptions::default(),
         );
@@ -359,4 +362,13 @@ impl Scene for FlightSim {
         let data = FlightData::gather(&self.plane, &self.controls, &self.world, &self.route);
         self.hud.draw(renderer, &data, &self.minimap, app.fps);
     }
+}
+
+fn sea_grid(cells: u32) -> MeshData {
+    let mut mesh = apricot::terrain::mesh_smooth(cells, cells, 1, 0.0, |_, _| 0.0);
+    let n = cells as f32;
+    for v in &mut mesh.vertices {
+        v.position = vec3(v.position.x / n - 0.5, 0.0, v.position.z / n - 0.5);
+    }
+    mesh
 }

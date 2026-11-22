@@ -1,7 +1,7 @@
 // Distances in meters, sea level at y=0
 const float PI = 3.14159265;
 const float PLANET_R = 6371e3;
-const float ATMOS_R  = 6471e3;
+const float ATMOS_R = 6471e3;
 const vec3 BETA_R = vec3(5.8e-6, 13.5e-6, 33.1e-6); // Rayleigh, why the sky looks blue!
 const float BETA_M = 21e-6; // Mie (haze and aerosols), the "visibility knob"
 const float H_R = 8000.0; // Rayleigh scale height
@@ -9,6 +9,7 @@ const float H_M = 1200.0; // Mie scale height
 const float MIE_G = 0.76; // How forward-scattering the haze is (the glow around the sun)
 const float SUN_INTENSITY = 20.0;
 const float EXPOSURE = 1.3;
+const vec3 WATER_BODY = vec3(0.004, 0.022, 0.035); // deep ocean, linear
 
 // Near and far distances where the ray hits a sphere of radius r at the origin. (-1, -1) on a miss
 vec2 ray_sphere(vec3 ro, vec3 rd, float r) {
@@ -27,7 +28,7 @@ float phase_rayleigh(float mu) {
 float phase_mie(float mu) {
     float g2 = MIE_G * MIE_G;
     return 3.0 / (8.0 * PI) * ((1.0 - g2) * (1.0 + mu * mu))
-         / ((2.0 + g2) * pow(1.0 + g2 - 2.0 * MIE_G * mu, 1.5));
+        / ((2.0 + g2) * pow(1.0 + g2 - 2.0 * MIE_G * mu, 1.5));
 }
 
 // How much air (rayleigh, mie) lies between p and space, toward the sun
@@ -91,6 +92,28 @@ vec3 scatter(float alt, vec3 dir, vec3 sun, float max_dist, int steps, out vec3 
     }
     float mu = dot(dir, sun);
     return SUN_INTENSITY * (sum_r * BETA_R * phase_rayleigh(mu) + sum_m * BETA_M * phase_mie(mu));
+}
+
+// draw the great deep beyond, so that the horizon looks right
+vec3 sea_beyond(float alt, vec3 dir, vec3 sun) {
+    vec3 ro = vec3(0.0, PLANET_R + max(alt, 1.0), 0.0);
+    float hit = ray_sphere(ro, dir, PLANET_R).x;
+    if (hit <= 0.0) {
+        return vec3(0.0);
+    }
+
+    vec3 n = normalize(ro + dir * hit);
+    float sin_graze = clamp(dot(-dir, n), 0.0, 1.0); // how steeply the ray meets the sea
+
+    float cos_graze = sqrt(1.0 - sin_graze * sin_graze);
+    vec2 across = normalize(dir.xz);
+    vec3 r = vec3(across.x * cos_graze, sin_graze, across.y * cos_graze);
+
+    vec3 unused;
+    vec3 sky_refl = scatter(0.0, r, sun, 1e12, 6, unused);
+    vec3 body = WATER_BODY / PI * sun_light(0.0, sun) * max(sun.y, 0.0);
+    float fresnel = 0.02 + 0.98 * pow(1.0 - sin_graze, 5.0);
+    return mix(body, sky_refl, fresnel);
 }
 
 // Convert linear HDR to display, use ACES curve cause it looks cool

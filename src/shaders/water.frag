@@ -8,7 +8,6 @@ in vec3 v_world_pos;
 out vec4 color;
 
 const float CAMERA_FAR = 60000.0; // keep up to date!
-const vec3 WATER_BODY = vec3(0.004, 0.022, 0.035); // deep ocean, linear
 
 const vec2 WIND_DIR = vec2(0.944, 0.330);
 const float CHOP = 0.7;
@@ -24,7 +23,7 @@ vec2 wave_slope(vec2 p, float t, out float filtered) {
     // Gusts make some patches of waves stronger or weaker
     vec2 drift = WIND_DIR * 3.0 * t;
     float gust = 0.6 * value_noise((p - drift) / 400.0)
-        + 0.4 * value_noise((p - drift) / 150.0);
+            + 0.4 * value_noise((p - drift) / 150.0);
 
     float k = 0.06; // wavenumber, 2pi / wavelength
     float amp = 0.6; // meters
@@ -65,6 +64,7 @@ vec2 wave_slope(vec2 p, float t, out float filtered) {
 void main() {
     vec3 l = normalize(u_sun_dir);
     vec3 view = v_world_pos - u_camera_pos;
+    view.y -= dot(view.xz, view.xz) / (2.0 * PLANET_R);
     float dist = length(view);
     vec3 v = view / dist;
 
@@ -97,11 +97,22 @@ void main() {
 
     vec3 water = mix(body, sky_refl, fresnel) + glint;
 
+    // Haze between here and the camera
     vec3 trans = vec3(1.0);
     vec3 inscatter = vec3(0.0);
     if (u_minimap == 0) {
-        inscatter = scatter(u_camera_pos.y, view / dist, l, air_distance(dist), 8, trans);
+        inscatter = scatter(u_camera_pos.y, v, l, dist, 8, trans);
+    }
+    vec3 result = water * trans + inscatter;
+
+    // blend into far-off sea
+    float edge = smoothstep(0.7 * CAMERA_FAR, CAMERA_FAR, dist);
+    if (u_minimap == 0 && edge > 0.0) {
+        vec3 far_trans;
+        vec3 far = scatter(u_camera_pos.y, v, l, 1e12, 8, far_trans);
+        far += far_trans * sea_beyond(u_camera_pos.y, v, l);
+        result = mix(result, far, edge);
     }
 
-    color = vec4(tonemap(water * trans + inscatter), 1.0);
+    color = vec4(tonemap(result), 1.0);
 }

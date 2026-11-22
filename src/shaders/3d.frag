@@ -60,6 +60,7 @@ void main() {
     vec3 inscatter = vec3(0.0);
     if (u_minimap == 0) {
         vec3 view = v_world_pos - u_camera_pos;
+        view.y -= dot(view.xz, view.xz) / (2.0 * PLANET_R);
         float dist = length(view);
         inscatter = scatter(u_camera_pos.y, view / dist, l, air_distance(dist), 8, trans);
     }

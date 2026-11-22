@@ -5,6 +5,7 @@ uniform mat4 u_proj_matrix;
 uniform mat4 u_light_mvp; // light's proj * view, only used when u_shadows != 0
 uniform float u_shadow_texel; // world-space size of one shadow-map texel
 uniform vec3 u_sun_dir; // direction towards the light
+uniform vec3 u_camera_pos;
 
 layout(location = 0) in vec3 a_position;
 layout(location = 1) in vec3 a_normal;
@@ -16,13 +17,20 @@ out vec4 v_light_space_pos;
 out float v_view_dist;
 out vec3 v_world_pos;
 
+const float PLANET_R = 6371e3; // keep in sync with atmosphere.glsl!
+
 void main() {
     vec4 world_pos = u_model_matrix * vec4(a_position, 1.0);
     mat3 normal_matrix = transpose(inverse(mat3(u_model_matrix)));
     vec3 n = normalize(normal_matrix * a_normal);
     vec3 l = normalize(u_sun_dir);
 
-    vec4 view_pos = u_view_matrix * world_pos;
+    // push vert down due to the curve of the earth
+    vec2 d = world_pos.xz - u_camera_pos.xz;
+    vec4 curved = world_pos;
+    curved.y -= dot(d, d) / (2.0 * PLANET_R);
+
+    vec4 view_pos = u_view_matrix * curved;
     v_view_dist = length(view_pos.xyz);
 
     // Look up the shadow from slightly above the surface, so it can never shadow itself.
@@ -33,6 +41,6 @@ void main() {
     v_normal = n;
     v_uv = a_uv;
     v_light_space_pos = u_light_mvp * vec4(world_pos.xyz + offset, 1.0);
-    v_world_pos = world_pos.xyz;
+    v_world_pos = world_pos.xyz; // use the flat world pos here for altitude and lighting stuff
     gl_Position = u_proj_matrix * view_pos;
 }
