@@ -4,7 +4,7 @@ use apricot::camera::floating_origin::FloatingOrigin;
 use nalgebra_glm::{vec3, DMat3, DQuat, DVec3, Mat4, Vec3};
 
 use crate::{
-    config::{AirplaneConfig, ContactKind},
+    config::{AirplaneConfig, ContactKind, FlapConfig},
     control::Controls,
 };
 
@@ -37,6 +37,11 @@ pub struct Airplane {
     pub orientation: DQuat,
     /// Body-space angular velocity of the plan [rad/s]
     body_angular_velocity: DVec3,
+
+    /// Which detent the flap lever is in
+    flap_lever: usize,
+    /// Where the flaps actually are, 0 up to 1 fully down. Follows the lever at the flap motor's speed
+    flaps: f64,
 
     slip_ball: f64,
 
@@ -84,6 +89,8 @@ impl Airplane {
             vel: vec3(55.0, 0.0, 0.0),
             orientation: DQuat::identity(),
             body_angular_velocity: vec3(0.0, 0.0, 0.0),
+            flap_lever: 0,
+            flaps: 0.0,
             slip_ball: 0.0,
             config,
             inertia,
@@ -106,6 +113,11 @@ impl Airplane {
         dt: f64,
         ground: &impl Fn(f64, f64) -> (f32, Vec3),
     ) {
+        if let Some(f) = &self.config.flaps {
+            let last = f.detents.len().saturating_sub(1) as i32;
+            self.flap_lever = (self.flap_lever as i32 + controls.flap_step).clamp(0, last) as usize;
+        }
+
         let steps = (dt / MAX_PHYSICS_STEP).ceil().max(1.0) as usize;
         let h = dt / steps as f64;
         for _ in 0..steps {
@@ -116,6 +128,8 @@ impl Airplane {
     fn step(&mut self, controls: &Controls, dt: f64, ground: &impl Fn(f64, f64) -> (f32, Vec3)) {
         let aero = self.calc_aero_state();
         let defl = Deflections::from_controls(controls, self.control_limits);
+
+        self.move_flaps(dt);
 
         // TODO: engine torque and P-factor
         let gravity = DVec3::new(0.0, -9.81, 0.0) * self.config.mass;
@@ -129,6 +143,27 @@ impl Airplane {
         self.update_slip_ball(total, dt);
         self.integrate_translation(total + gravity, dt);
         self.integrate_rotation(torque + wing_torque + ground_torque, dt);
+    }
+
+    /// Run the flap motor to the target setting
+    fn move_flaps(&mut self, dt: f64) {
+        let Some(f) = &self.config.flaps else {
+            return;
+        };
+        let (Some(&lever), Some(&full)) = (f.detents.get(self.flap_lever), f.detents.last()) else {
+            return;
+        };
+        let target = if full > 0.0 { lever / full } else { 0.0 };
+        let max_move = dt / f.travel_time;
+        self.flaps += (target - self.flaps).clamp(-max_move, max_move);
+    }
+
+    /// One of the flap effects, scaled by how far down the flaps are. 0 for planes without flaps
+    fn flap(&self, effect: impl Fn(&FlapConfig) -> f64) -> f64 {
+        self.config
+            .flaps
+            .as_ref()
+            .map_or(0.0, |f| effect(f) * self.flaps)
     }
 
     fn calc_aero_state(&self) -> AeroState {
@@ -213,7 +248,8 @@ impl Airplane {
             let c_lift = self.lift_coefficient(alpha) + elevator_cl - side * aileron_cl;
 
             let c_drag_attached = c.drag_coefficient_base
-                + c_lift * c_lift / (std::f64::consts::PI * aspect_ratio * c.oswald_efficiency);
+                + c_lift * c_lift / (std::f64::consts::PI * aspect_ratio * c.oswald_efficiency)
+                + self.flap(|f| f.delta_cd);
             let c_drag = c_drag_attached.max(2.0 * alpha.sin().powi(2));
 
             let up = DVec3::y();
@@ -235,13 +271,59 @@ impl Airplane {
         )
     }
 
+    /// How much of the full-flap lift the flaps make where they are now, 0 to 1
+    fn flap_lift_fraction(&self) -> f64 {
+        let Some(f) = &self.config.flaps else {
+            return 0.0;
+        };
+        let Some(table) = &f.lift_fraction else {
+            return self.flaps;
+        };
+        let angle = self.flaps * f.detents.last().copied().unwrap_or(0.0);
+
+        // Blend between the detents at either side
+        for i in 1..f.detents.len() {
+            let (a0, a1) = (f.detents[i - 1], f.detents[i]);
+            if angle <= a1 {
+                let t = if a1 > a0 {
+                    (angle - a0) / (a1 - a0)
+                } else {
+                    1.0
+                };
+                return table[i - 1] + (table[i] - table[i - 1]) * t;
+            }
+        }
+        table.last().copied().unwrap_or(0.0)
+    }
+
+    /// Lift at zero angle of attack and the most lift the wing can make, with the flaps where they are
+    fn lift_curve(&self) -> (f64, f64) {
+        let lift = self.flap_lift_fraction();
+        let (delta_cl, delta_max_cl) = self
+            .config
+            .flaps
+            .as_ref()
+            .map_or((0.0, 0.0), |f| (f.delta_cl, f.delta_max_cl));
+        (
+            self.config.zero_lift_coefficient + delta_cl * lift,
+            self.config.max_cl + delta_max_cl * lift,
+        )
+    }
+
+    /// Angle of attack where the lift curve tops out [rad]
+    fn stall_alpha(&self) -> f64 {
+        let (zero_lift, max_cl) = self.lift_curve();
+        (max_cl - zero_lift) / self.config.lift_slope
+    }
+
     fn lift_coefficient(&self, alpha: f64) -> f64 {
-        let linear = self.config.zero_lift_coefficient + self.config.lift_slope * alpha;
+        let (zero_lift, max_cl) = self.lift_curve();
+        let min_cl = self.config.min_cl;
+        let linear = zero_lift + self.config.lift_slope * alpha;
 
         // aoa at which the linear curve hits its limit
         let alpha_stall_pos = self.stall_alpha();
-        let alpha_stall_neg =
-            (self.config.min_cl - self.config.zero_lift_coefficient) / self.config.lift_slope;
+        let alpha_stall_neg = (min_cl - zero_lift) / self.config.lift_slope;
 
         let flat_plate = (2.0 * alpha).sin(); // high aoa lift
         let blend_width = 8.0_f64.to_radians();
@@ -249,19 +331,14 @@ impl Airplane {
         if alpha > alpha_stall_pos {
             let t = ((alpha - alpha_stall_pos) / blend_width).min(1.0);
             let t = t * t * (3.0 - 2.0 * t); // smoothstep
-            self.config.max_cl + (flat_plate - self.config.max_cl) * t
+            max_cl + (flat_plate - max_cl) * t
         } else if alpha < alpha_stall_neg {
             let t = ((alpha_stall_neg - alpha) / blend_width).min(1.0);
             let t = t * t * (3.0 - 2.0 * t); // smoothstep
-            self.config.min_cl + (flat_plate - self.config.min_cl) * t
+            min_cl + (flat_plate - min_cl) * t
         } else {
             linear
         }
-    }
-
-    /// Angle of attack where the lift curve tops out [rad]
-    fn stall_alpha(&self) -> f64 {
-        (self.config.max_cl - self.config.zero_lift_coefficient) / self.config.lift_slope
     }
 
     /// Pitching moment from angle of attack. Flattens out past the stall
@@ -293,8 +370,11 @@ impl Airplane {
         // Moment coeffs
         let d = &self.config.derivs;
         let c_roll = d.cl_beta * beta;
-        let c_pitch =
-            d.cm_0 + self.cm_from_alpha(alpha) + d.cm_q * q_hat + d.cm_elevator * defl.elevator;
+        let c_pitch = d.cm_0
+            + self.flap(|f| f.delta_cm)
+            + self.cm_from_alpha(alpha)
+            + d.cm_q * q_hat
+            + d.cm_elevator * defl.elevator;
         let c_yaw = d.cn_beta * beta + d.cn_r * r_hat + d.cn_rudder * defl.rudder;
 
         // Dimensional moments
@@ -483,6 +563,13 @@ impl Airplane {
         let omega = nalgebra_glm::quat_rotate_vec3(&self.orientation, &self.body_angular_velocity);
         -omega.y // +Y is yawing right
     }
+
+    /// Where the flap lever is and where the flaps actually are [deg]. None for planes without flaps
+    pub fn flap_angles(&self) -> Option<(f64, f64)> {
+        let f = self.config.flaps.as_ref()?;
+        let full = *f.detents.last()?;
+        Some((*f.detents.get(self.flap_lever)?, self.flaps * full))
+    }
 }
 
 /// Friction against sliding at `v`, up to `mu * normal_force`
@@ -660,5 +747,44 @@ mod tests {
         let f = forces(&p, &Controls::new());
         p.update_slip_ball(f, 1.0);
         assert!(p.slip() < 0.0, "the ball goes to the outside (left)");
+    }
+
+    #[test]
+    fn flaps_add_lift_and_drag() {
+        let mut p = plane_at(vec3(55.0, 0.0, 0.0));
+        let clean = forces(&p, &Controls::new());
+        p.flaps = 1.0;
+        let full = forces(&p, &Controls::new());
+        assert!(full.y > clean.y, "more lift");
+        assert!(full.x < clean.x, "more drag");
+    }
+
+    #[test]
+    fn flaps_stall_at_a_lower_angle() {
+        let mut p = plane_at(vec3(55.0, 0.0, 0.0));
+        let clean = p.stall_alpha();
+        p.flaps = 1.0;
+        assert!(p.stall_alpha() < clean);
+    }
+
+    #[test]
+    fn flap_lever_stops_at_the_last_detent() {
+        let mut p = plane_at(vec3(55.0, 0.0, 0.0));
+        let mut c = Controls::new();
+        c.flap_step = 1;
+        for _ in 0..20 {
+            p.update(&c, 0.01, &|_, _| (-1000.0, Vec3::y()));
+        }
+        let detents = p.config.flaps.as_ref().unwrap().detents.len();
+        assert_eq!(p.flap_lever, detents - 1);
+    }
+
+    #[test]
+    fn flap_lift_follows_the_table() {
+        let mut p = plane_at(vec3(55.0, 0.0, 0.0));
+        let f = p.config.flaps.clone().unwrap();
+        let (detents, table) = (&f.detents, f.lift_fraction.as_ref().unwrap());
+        p.flaps = detents[2] / detents.last().unwrap();
+        assert!((p.flap_lift_fraction() - table[2]).abs() < 1e-9);
     }
 }

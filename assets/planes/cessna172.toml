@@ -97,7 +97,9 @@ max_brake_friction = 0.35
 
 [flaps]
 detents = [0.0, 10.0, 20.0, 30.0]
+lift_fraction = [0.0, 0.4, 0.75, 1.0]
 delta_cl = 0.8
 delta_max_cl = 0.7
 delta_cd = 0.06
 delta_cm = -0.05
+travel_time = 8.0

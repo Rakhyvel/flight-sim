@@ -53,3 +53,5 @@ sag = 0.05
 damping = 0.6
 rebound_damping = 2.0
 max_brake_friction = 0.3
+
+# no flaps!

@@ -87,6 +87,10 @@ pub struct GearConfig {
 pub struct FlapConfig {
     /// Flap settings [deg], the last one is full
     pub detents: Vec<f64>,
+    /// How much of the full-flap lift each detent gives, 0 to 1, one per detent. Leave it out and
+    /// the lift goes up evenly with angle
+    #[serde(default)]
+    pub lift_fraction: Option<Vec<f64>>,
     /// Extra lift at full flaps
     pub delta_cl: f64,
     /// Extra max lift at full flaps
@@ -95,6 +99,8 @@ pub struct FlapConfig {
     pub delta_cd: f64,
     /// Pitching moment at full flaps (- = nose down)
     pub delta_cm: f64,
+    /// Seconds for the flaps to go from up to fully down
+    pub travel_time: f64,
 }
 
 #[derive(Clone, Copy, Deserialize)]
@@ -149,6 +155,17 @@ fn default_contact_radius() -> f64 {
 
 impl AirplaneConfig {
     pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let config: Self = toml::from_str(&std::fs::read_to_string(path)?)?;
+        if let Some(f) = &config.flaps {
+            if f.lift_fraction
+                .as_ref()
+                .is_some_and(|l| l.len() != f.detents.len())
+            {
+                return Err(
+                    format!("{path}: flaps.lift_fraction needs one value per detent").into(),
+                );
+            }
+        }
         Ok(toml::from_str(&std::fs::read_to_string(path)?)?)
     }
 

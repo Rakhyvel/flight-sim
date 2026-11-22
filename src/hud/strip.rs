@@ -97,6 +97,15 @@ fn cells(data: &FlightData) -> Vec<Cell> {
         ]);
     }
     let braking = data.brakes > 0.5;
+    if let Some((lever, actual)) = data.flaps {
+        let moving = (lever - actual).abs() > 0.5;
+        cells.push(cell(
+            "FLAP",
+            format!("{actual:.0}"),
+            if moving { ACCENT } else { TEXT },
+            2,
+        ));
+    }
     cells.extend([
         cell("THR", format!("{:.0}%", data.throttle * 100.0), TEXT, 4),
         cell(

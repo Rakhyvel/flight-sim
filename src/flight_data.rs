@@ -23,6 +23,8 @@ pub struct FlightData {
 
     pub throttle: f32,
     pub brakes: f32,
+    /// Flap lever and actual flap position [deg]. None for planes without flaps
+    pub flaps: Option<(f32, f32)>,
 
     /// A point the plane is flying toward, relative to the floating origin. None when not moving
     pub flight_path_point: Option<Vec3>,
@@ -72,6 +74,9 @@ impl FlightData {
             vertical_speed: plane.vel.y as f32,
             throttle: controls.throttle,
             brakes: controls.brakes,
+            flaps: plane
+                .flap_angles()
+                .map(|(lever, actual)| (lever as f32, actual as f32)),
             flight_path_point,
             nav: NavData::gather(plane, ground_speed, route),
             slip: plane.slip() as f32,
