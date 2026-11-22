@@ -3,6 +3,8 @@ uniform vec3 u_camera_pos;
 uniform float u_time;
 uniform int u_minimap; // 1 while drawing the minimap, no air between the camera and the ground
 uniform vec2 u_origin;
+uniform sampler2D u_sky_view;
+uniform sampler2D u_sea_sky;
 
 in vec3 v_world_pos;
 
@@ -84,7 +86,7 @@ void main() {
     vec3 r = reflect(v, n);
     r.y = abs(r.y); // redirect any steep waves back upwards
     vec3 unused;
-    vec3 sky_refl = scatter(0.0, r, l, 1e12, 6, unused);
+    vec3 sky_refl = sky_lut(u_sea_sky, 0.0, r, l);
 
     // Light coming back up out of the water
     vec3 body = WATER_BODY / PI * (v_sun * max(l.y, 0.0) + v_sky_up * PI);
@@ -110,9 +112,7 @@ void main() {
     // blend into far-off sea
     float edge = smoothstep(0.7 * CAMERA_FAR, CAMERA_FAR, dist);
     if (u_minimap == 0 && edge > 0.0) {
-        vec3 far_trans;
-        vec3 far = scatter(u_camera_pos.y, v, l, 1e12, 8, far_trans);
-        far += far_trans * sea_beyond(u_camera_pos.y, v, l);
+        vec3 far = sky_lut(u_sky_view, u_camera_pos.y, v, l); // already has the sea below the horizon in it
         result = mix(result, far, edge);
     }
 

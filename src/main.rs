@@ -17,6 +17,7 @@ use nalgebra_glm::{vec2, vec3, vec4, Mat4};
 
 use crate::{
     airplane::Airplane,
+    atmosphere::Atmosphere,
     config::AirplaneConfig,
     control::Controls,
     engine_sound::EngineSound,
@@ -28,9 +29,16 @@ use crate::{
     world::{World, RENDER_DISTANCE},
 };
 
-mod air_lut;
+/// Concat a bunch of glsl files together to form a full shader. Prepends the version
+macro_rules! glsl {
+    ($($file:literal),+ $(,)?) => {
+        concat!("#version 330 core\n", $(include_str!($file), "\n"),+)
+    };
+}
+
 mod airplane;
 mod airport;
+mod atmosphere;
 mod config;
 mod control;
 mod engine_sound;
@@ -47,9 +55,6 @@ mod waypoint;
 mod world;
 
 const LOADS_PER_FRAME: usize = 1;
-
-/// Texture unit the atmosphere shaders read their air lookup from
-const AIR_LUT_UNIT: u32 = 2;
 
 // todo:
 // - [x] good aero model
@@ -107,7 +112,7 @@ struct FlightSim {
 
     water_program: ProgramId,
     sea_mesh: MeshId,
-    air_lut: TextureId,
+    atmosphere: Atmosphere,
 
     world: World,
 
@@ -134,12 +139,6 @@ struct FlightSim {
     route: Route,
 }
 
-macro_rules! glsl {
-    ($($file:literal),+ $(,)?) => {
-        concat!("#version 330 core\n", $(include_str!($file), "\n"),+)
-    };
-}
-
 impl FlightSim {
     fn new(app: &App) -> Result<Self, Error> {
         let renderer = &app.renderer;
@@ -160,6 +159,7 @@ impl FlightSim {
             include_str!("shaders/sky.vert"),
             glsl!(
                 "shaders/atmosphere.glsl",
+                "shaders/sky_lut.glsl",
                 "shaders/tonemap.glsl",
                 "shaders/sky.frag",
             ),
@@ -169,6 +169,7 @@ impl FlightSim {
             glsl!("shaders/atmosphere.glsl", "shaders/3d.vert"),
             glsl!(
                 "shaders/atmosphere.glsl",
+                "shaders/sky_lut.glsl",
                 "shaders/tonemap.glsl",
                 "shaders/lighting.glsl",
                 "shaders/noise.glsl",
@@ -177,14 +178,10 @@ impl FlightSim {
             Some("water"),
         )?;
 
-        // Air lookup for the atmosphere shaders
-        let air_lut =
-            renderer.create_texture_rgba(air_lut::WIDTH, air_lut::HEIGHT, &air_lut::pixels());
-        renderer.get_texture_from_id(air_lut).set_smooth(true);
+        // Atmosphere lookups for the shaders
+        let atmosphere = Atmosphere::new(renderer)?;
         for program in [renderer.builtins.program_3d, sky_program, water_program] {
-            renderer
-                .uniform(program, "u_air_lut")
-                .set_i32(AIR_LUT_UNIT as i32);
+            atmosphere.connect(renderer, program);
         }
 
         let light_dir = vec3(0.5, 0.3, 0.0).normalize();
@@ -195,7 +192,7 @@ impl FlightSim {
         let regions = load_regions("assets/regions.toml");
         let region = regions
             .iter()
-            .find(|r| r.name == "Denver")
+            .find(|r| r.name == "Maui")
             .expect("no region");
         let world = World::load(renderer, region).expect("couldnt load region");
 
@@ -205,7 +202,7 @@ impl FlightSim {
             plane_mesh: renderer.add_mesh_data(plane_model.body, None),
             plane_trim_mesh: renderer.add_mesh_data(plane_model.trim, None),
             plane_prop_mesh: renderer.add_mesh_data(plane_model.prop, None),
-            air_lut,
+            atmosphere,
             prop_angle: 0.0,
             prop_rps: 0.0,
             cam_distance: 25.0,
@@ -225,8 +222,8 @@ impl FlightSim {
         };
 
         let mut waypoints = vec![];
-        let depart_runway = sim.world.runway("KBJC 12L").expect("no runway");
-        let arrive_runway = sim.world.runway("KAPA 17L").expect("no runway");
+        let depart_runway = sim.world.runway("PHMK 17").expect("no runway");
+        let arrive_runway = sim.world.runway("PHSF 09").expect("no runway");
         waypoints.extend(sim.world.approach(arrive_runway));
         sim.route = Route::new(waypoints);
 
@@ -331,7 +328,11 @@ impl Scene for FlightSim {
     fn render(&mut self, app: &App) {
         let renderer = &app.renderer;
 
-        renderer.bind_texture_unit(AIR_LUT_UNIT, self.air_lut); // every frame, in case something else takes the unit
+        self.atmosphere.update(
+            renderer,
+            renderer.camera().position().y,
+            self.light.direction(),
+        );
 
         let sea_size = 2.0 * RENDER_DISTANCE as f32;
         let plane_pos = self.world.origin.relative(self.plane.pos);
