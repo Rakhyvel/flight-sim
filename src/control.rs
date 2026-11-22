@@ -30,7 +30,7 @@ impl Controls {
             pitch: 0.0,
             roll: 0.0,
             yaw: 0.0,
-            throttle: 0.7,
+            throttle: 0.0,
 
             pan: 0.0,
 

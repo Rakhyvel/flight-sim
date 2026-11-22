@@ -9,7 +9,7 @@ use apricot::{
     mesh::MeshData,
     opengl::DrawOptions,
     render::{
-        assets::{MeshId, ProgramId},
+        assets::{MeshId, ProgramId, TextureId},
         lighting::DirectionalLight,
     },
 };
@@ -28,6 +28,7 @@ use crate::{
     world::{World, RENDER_DISTANCE},
 };
 
+mod air_lut;
 mod airplane;
 mod airport;
 mod config;
@@ -47,17 +48,22 @@ mod world;
 
 const LOADS_PER_FRAME: usize = 4;
 
+/// Texture unit the atmosphere shaders read their air lookup from
+const AIR_LUT_UNIT: u32 = 2;
+
 // todo:
 // - [x] good aero model
 // - [x] joystick
 // - [x] better plane model
-//     - [ ] c to free mouse orbit
+//     - [ ] c to free mouse orbit, and joystick hat
 //     - [ ] z to zoom in ON THE VELOCITY VECTOR not the plane
 // - [x] better worldgen model (like 100km, real maps, hawaii, denver)
 //     - [x] mini map
 // - [ ] weather, wind, time of day
 //     - [x] distance haze, fog
 //     - [ ] Higher LOD shadow maps for the airplane, maybe cascading shadow maps
+//     - [ ] actual times of day that change in real time
+//     - [ ] night time, stars, moon phase and light, runway point lights (needs big apricot lift)
 //     - [x] atmospheric effects (golden hour, overcast skies, sunrise, sunset)
 //     - [ ] rain, wind, upwelling from mountains, actual raindrops when raining?
 //     - [ ] volumetric clouds that move with the wind and exist where they would exist
@@ -80,8 +86,9 @@ const LOADS_PER_FRAME: usize = 4;
 // - [ ] fuel, wet mass, cargo mass
 // - [x] waypoints, IFR, ATC call outs? flight plans?
 // - [ ] missions/scenarios
-//     - [ ] load from toml, title, have desc, region, plane load out, waypoints, and landing objectives
+//     - [ ] load from toml, title, have desc, region, ToD, plane load out, waypoints, and landing objectives
 //     - [ ] main menu that lists scenarios, using UI (move delta-horizon's UI to apricot?)
+//     - [ ] custom mission editor
 // - [ ] cockpit camera? idrc about this ngl
 
 fn main() -> Result<(), Error> {
@@ -99,6 +106,7 @@ struct FlightSim {
 
     water_program: ProgramId,
     sea_mesh: MeshId,
+    air_lut: TextureId,
 
     world: World,
 
@@ -146,7 +154,7 @@ impl FlightSim {
             ),
             Some("3d"),
         )?;
-        renderer.add_program_from_source(
+        let sky_program = renderer.add_program_from_source(
             include_str!("shaders/sky.vert"),
             frag!("shaders/atmosphere.glsl", "shaders/sky.frag",),
             Some("sky"),
@@ -162,7 +170,17 @@ impl FlightSim {
             Some("water"),
         )?;
 
-        let light_dir = vec3(0.5, 0.01, 0.0).normalize();
+        // Air lookup for the atmosphere shaders
+        let air_lut =
+            renderer.create_texture_rgba(air_lut::WIDTH, air_lut::HEIGHT, &air_lut::pixels());
+        renderer.get_texture_from_id(air_lut).set_smooth(true);
+        for program in [renderer.builtins.program_3d, sky_program, water_program] {
+            renderer
+                .uniform(program, "u_air_lut")
+                .set_i32(AIR_LUT_UNIT as i32);
+        }
+
+        let light_dir = vec3(0.5, 0.0, 0.0).normalize();
         let mut light = DirectionalLight::new(light_dir, 2048)?;
         light.frustum.shadow_distance = 150.0;
         app.renderer.set_light(Some(&light));
@@ -180,6 +198,7 @@ impl FlightSim {
             plane_mesh: renderer.add_mesh_data(plane_model.body, None),
             plane_trim_mesh: renderer.add_mesh_data(plane_model.trim, None),
             plane_prop_mesh: renderer.add_mesh_data(plane_model.prop, None),
+            air_lut,
             prop_angle: 0.0,
             prop_rps: 0.0,
             cam_distance: 25.0,
@@ -304,6 +323,8 @@ impl Scene for FlightSim {
 
     fn render(&mut self, app: &App) {
         let renderer = &app.renderer;
+
+        renderer.bind_texture_unit(AIR_LUT_UNIT, self.air_lut); // every frame, in case something else takes the unit
 
         let sea_size = 2.0 * RENDER_DISTANCE as f32;
         let plane_pos = self.world.origin.relative(self.plane.pos);

@@ -1,3 +1,8 @@
+uniform sampler2D u_air_lut; // see air_lut.rs
+
+const float AIR_LUT_MAX = 1e6; // keep in sync with air_lut.rs
+const vec2 AIR_LUT_SIZE = vec2(256.0, 64.0);
+
 // Distances in meters, sea level at y=0
 const float PI = 3.14159265;
 const float PLANET_R = 6371e3;
@@ -8,7 +13,7 @@ const float H_R = 8000.0; // Rayleigh scale height
 const float H_M = 1200.0; // Mie scale height
 const float MIE_G = 0.76; // How forward-scattering the haze is (the glow around the sun)
 const float SUN_INTENSITY = 20.0;
-const float EXPOSURE = 1.3;
+const float EXPOSURE = 1.0;
 const vec3 WATER_BODY = vec3(0.004, 0.022, 0.035); // deep ocean, linear
 
 // Near and far distances where the ray hits a sphere of radius r at the origin. (-1, -1) on a miss
@@ -32,14 +37,14 @@ float phase_mie(float mu) {
 }
 
 // How much air (rayleigh, mie) lies between p and space, toward the sun
-vec2 optical_depth_to_sun(vec3 p, vec3 sun, int steps) {
-    float ds = ray_sphere(p, sun, ATMOS_R).y / float(steps);
-    vec2 od = vec2(0.0);
-    for (int i = 0; i < steps; i++) {
-        float h = length(p + sun * (float(i) + 0.5) * ds) - PLANET_R;
-        od += exp(-h / vec2(H_R, H_M)) * ds;
-    }
-    return od;
+vec2 optical_depth_to_sun(vec3 p, vec3 sun) {
+    float r = length(p);
+    float mu = dot(p, sun) / r;
+    float v = sqrt(clamp((r - PLANET_R) / (ATMOS_R - PLANET_R), 0.0, 1.0));
+    vec2 uv = (0.5 + vec2(mu * 0.5 + 0.5, v) * (AIR_LUT_SIZE - 1.0)) / AIR_LUT_SIZE; // so the ends land on texel centers
+    vec4 t = texture(u_air_lut, uv);
+    const vec2 BYTES = vec2(65280.0, 255.0) / 65535.0; // high byte, low byte
+    return vec2(dot(t.rg, BYTES), dot(t.ba, BYTES)) * AIR_LUT_MAX;
 }
 
 vec3 transmittance(vec2 od) {
@@ -52,7 +57,7 @@ vec3 sun_light(float alt, vec3 sun) {
     if (ray_sphere(p, sun, PLANET_R).x > 0.0) {
         return vec3(0.0); // its nighttime babey!
     }
-    return SUN_INTENSITY * transmittance(optical_depth_to_sun(p, sun, 8));
+    return SUN_INTENSITY * transmittance(optical_depth_to_sun(p, sun));
 }
 
 // Light scatted towards the eye along a ray from altitude `alt` in `dir`, for up to `max_dist`.
@@ -83,7 +88,7 @@ vec3 scatter(float alt, vec3 dir, vec3 sun, float max_dist, int steps, out vec3 
 
         if (ray_sphere(p, sun, PLANET_R).x <= 0.0) {
             // Not in the earth's shadow
-            vec3 sun_t = transmittance(optical_depth_to_sun(p, sun, 4));
+            vec3 sun_t = transmittance(optical_depth_to_sun(p, sun));
             vec3 weight = trans * sun_t * (1.0 - step_trans) / extinction;
             sum_r += density.x * weight;
             sum_m += density.y * weight;
