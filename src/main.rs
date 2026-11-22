@@ -354,7 +354,7 @@ impl Scene for FlightSim {
             sea,
             &self.plane,
             &self.world.map,
-            &self.world.drawn,
+            &self.world,
             &self.light,
             &self.world.origin,
         );

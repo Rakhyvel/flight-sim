@@ -26,9 +26,10 @@ const SNOWLINE: f32 = 2800.0;
 pub fn tile_texture(map: &Heightmap, x0: i32, z0: i32, step: u32, n: u32) -> Vec<u8> {
     let step = step as i32;
     let mut pixels = Vec::with_capacity((n * n * 4) as usize);
+    let texel_m = step as f32 * map.spacing_x.max(map.spacing_z);
     for z in 0..n as i32 {
         for x in 0..n as i32 {
-            let c = terrain_albedo(map, x0 + x * step, z0 + z * step);
+            let c = terrain_albedo(map, x0 + x * step, z0 + z * step, texel_m);
             let srgb = |v: f32| (v.clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0).round() as u8;
             pixels.extend_from_slice(&[srgb(c.x), srgb(c.y), srgb(c.z), 255]);
         }
@@ -36,7 +37,7 @@ pub fn tile_texture(map: &Heightmap, x0: i32, z0: i32, step: u32, n: u32) -> Vec
     pixels
 }
 
-fn terrain_albedo(map: &Heightmap, gx: i32, gz: i32) -> Vec3 {
+fn terrain_albedo(map: &Heightmap, gx: i32, gz: i32, texel_m: f32) -> Vec3 {
     let h = map.sample(gx, gz);
     if h <= 0.0 {
         return SEA_FLOOR.into();
@@ -60,6 +61,7 @@ fn terrain_albedo(map: &Heightmap, gx: i32, gz: i32) -> Vec3 {
     // Add big patches and fine speckle
     let patches = value_noise(wx, wz, 1.0 / 900.0, 3, 1);
     let speckle = value_noise(wx, wz, 1.0 / 60.0, 2, 2);
+    let speckle = 0.5 + (speckle - 0.5) * (1.0 - smoothstep(30.0, 60.0, texel_m)); // texels farther apart than half its size would just alias it
 
     let moisture = (patches + 0.35 * hollow).clamp(0.0, 1.0);
 

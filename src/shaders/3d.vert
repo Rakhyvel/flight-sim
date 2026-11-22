@@ -1,4 +1,5 @@
 uniform mat4 u_model_matrix;
+uniform mat3 u_normal_matrix; // inverse transpose of the model matrix, for normals
 uniform mat4 u_view_matrix;
 uniform mat4 u_proj_matrix;
 uniform mat4 u_light_mvp; // light's proj * view, only used when u_shadows != 0
@@ -34,8 +35,7 @@ float air_distance(float dist) {
 
 void main() {
     vec4 world_pos = u_model_matrix * vec4(a_position, 1.0);
-    mat3 normal_matrix = transpose(inverse(mat3(u_model_matrix)));
-    vec3 n = normalize(normal_matrix * a_normal);
+    vec3 n = normalize(u_normal_matrix * a_normal);
     vec3 l = normalize(u_sun_dir);
 
     // push vert down due to the curve of the earth

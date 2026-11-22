@@ -1,5 +1,5 @@
-// The sky worked out ahead of time into a texture, see sky.rs
-const vec2 SKY_LUT_SIZE = vec2(192.0, 128.0); // keep in sync with sky.rs
+// The sky worked out ahead of time into a texture, see atmosphere/mod.rs
+const vec2 SKY_LUT_SIZE = vec2(192.0, 128.0); // keep in sync with atmosphere/mod.rs
 
 // How far below level the true horizon is from altitude `alt` [rad, negative]
 float horizon_elevation(float alt) {

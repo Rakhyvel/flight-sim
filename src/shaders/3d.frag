@@ -1,4 +1,5 @@
 uniform sampler2D u_texture;
+uniform sampler2D u_normal_map;
 uniform vec4 u_color;
 uniform vec3 u_sun_dir;
 uniform vec3 u_camera_pos;
@@ -18,6 +19,20 @@ in vec3 v_haze_m; // mie
 in vec3 v_haze_trans; // how much of the surface shows through it
 
 out vec4 color;
+
+// Pull corner-to-corner `uv` into texel centers
+vec2 edge_uv(sampler2D tex, vec2 uv) {
+    vec2 size = vec2(textureSize(tex, 0));
+    return (uv * (size - 1.0) + 0.5) / size;
+}
+
+// The ground's normal at corner-to-corner `uv`
+vec3 terrain_normal(vec2 uv) {
+    vec4 t = texture(u_normal_map, edge_uv(u_normal_map, uv));
+    const vec2 BYTES = vec2(65280.0, 255.0) / 65535.0; // high byte, low byte
+    vec2 xz = vec2(dot(t.rg, BYTES), dot(t.ba, BYTES)) * 2.0 - 1.0;
+    return vec3(xz.x, sqrt(max(1.0 - dot(xz, xz), 0.0)), xz.y);
+}
 
 float ground_detail(vec2 p) {
     float footprint = length(fwidth(p));
@@ -43,10 +58,12 @@ void main() {
         return;
     }
 
-    vec3 n = normalize(v_normal);
+    // Terrain lines its texture up on the tile edges and gets finer normals than its mesh
+    bool terrain = u_detail > 0.5;
+    vec3 n = terrain ? terrain_normal(v_uv) : normalize(v_normal);
     vec3 l = normalize(u_sun_dir);
 
-    vec4 base = texture(u_texture, v_uv) * u_color;
+    vec4 base = texture(u_texture, terrain ? edge_uv(u_texture, v_uv) : v_uv) * u_color;
     vec3 albedo = pow(base.rgb, vec3(2.2)); // convert color to linear
     albedo *= 1.0 + 0.6 * ground_detail(v_world_pos.xz + u_origin) * u_detail;
 

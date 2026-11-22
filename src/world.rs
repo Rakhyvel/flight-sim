@@ -8,7 +8,11 @@ use apricot::{
     geometry::aabb::AABB,
     model_set::{Model, ModelSet},
     opengl::DrawOptions,
-    render::{assets::MeshId, lighting::ShadowPass, RenderContext},
+    render::{
+        assets::{MeshId, TextureId},
+        lighting::ShadowPass,
+        RenderContext,
+    },
 };
 use nalgebra_glm::{vec3, vec4, DVec2, DVec3, Mat4, Vec3};
 
@@ -49,6 +53,17 @@ const MAX_CURVE_DROP: f32 = (RENDER_DISTANCE * RENDER_DISTANCE / (2.0 * 6_371_00
 const ORIGIN_SNAP: f64 = 1024.0;
 const RECENTER_DISTANCE: f64 = 2048.0;
 
+/// Texture unit terrain reads its normals from
+const NORMAL_UNIT: u32 = 5;
+
+/// A tile's ground, ready to draw
+#[derive(Clone, Copy)]
+struct BuiltTile {
+    model: Model,
+    /// Which way the ground faces, finer than the mesh
+    normals: TextureId,
+}
+
 pub struct World {
     pub runways: Vec<Runway>,
     /// Where each runway's meshes are anchored, and its asphalt and markings
@@ -60,9 +75,9 @@ pub struct World {
     /// Which tiles to draw
     tree: TileTree,
     /// Every built tile, drawn or not
-    tiles: HashMap<Tile, Model>,
+    tiles: HashMap<Tile, BuiltTile>,
     /// The tiles being drawn this frame
-    pub drawn: ModelSet<Tile>,
+    drawn: ModelSet<Tile>,
 
     /// Everything is drawn relative to this
     pub origin: FloatingOrigin,
@@ -152,6 +167,10 @@ impl World {
             })
             .collect();
 
+        renderer
+            .uniform(renderer.builtins.program_3d, "u_normal_map")
+            .set_i32(NORMAL_UNIT as i32);
+
         Ok(Self {
             runways,
             runway_meshes,
@@ -212,7 +231,7 @@ impl World {
         self.origin.transform(corner, scale)
     }
 
-    fn build_tile(&self, renderer: &RenderContext, tile: Tile) -> Model {
+    fn build_tile(&self, renderer: &RenderContext, tile: Tile) -> BuiltTile {
         let (ox, oz) = tile.origin();
         let map = &self.map;
         let (w, d) = map.size();
@@ -225,15 +244,28 @@ impl World {
             }
         };
 
+        // Shape
         let (n, step) = (tile.cells(), tile.step());
         let mesh = apricot::terrain::mesh_smooth(n, n, step, SKIRT_PER_STEP * step as f32, height);
         let mesh = renderer.add_mesh_data(mesh, None);
 
-        let pixels = terrain_color::tile_texture(map, ox, oz, step, TILE_QUADS);
-        let texture = renderer.create_texture_rgba(TILE_QUADS, TILE_QUADS, &pixels);
+        // Color a texel on every vertex on both edges
+        let pixels = terrain_color::tile_texture(map, ox, oz, step, TILE_QUADS + 1);
+        let texture = renderer.create_texture_rgba(TILE_QUADS + 1, TILE_QUADS + 1, &pixels);
         renderer.get_texture_from_id(texture).set_smooth(true);
 
-        Model::new(mesh, texture, self.tile_transform(tile))
+        // Normals
+        let normal_step = (step / 2).max(1); // level 0 is already every cell
+        let normal_n = n / normal_step + 1; // twice as fine as the mesh so the lighting looks good
+        let spacing = (map.spacing_x, map.spacing_z);
+        let pixels = tile_normals(&height, spacing, normal_step, normal_n);
+        let normals = renderer.create_texture_rgba(normal_n, normal_n, &pixels);
+        renderer.get_texture_from_id(normals).set_smooth(true);
+
+        BuiltTile {
+            model: Model::new(mesh, texture, self.tile_transform(tile)),
+            normals,
+        }
     }
 
     /// Stream terrain tiles around `pos`, building at most `max_loads` of them
@@ -247,8 +279,8 @@ impl World {
             .take(max_loads)
             .collect();
         for tile in todo {
-            let model = self.build_tile(renderer, tile);
-            self.tiles.insert(tile, model);
+            let built_tile = self.build_tile(renderer, tile);
+            self.tiles.insert(tile, built_tile);
         }
 
         // Draw the best of what's built
@@ -266,7 +298,7 @@ impl World {
         }
         for &tile in &draw {
             if self.drawn.get(tile).is_none() {
-                let mut model = self.tiles[&tile];
+                let mut model = self.tiles[&tile].model;
                 model.transform = self.tile_transform(tile); // the origin may have moved since it was built
                 let mut bounds: AABB = renderer.get_mesh_aabb(model.mesh);
                 bounds.min.y -= MAX_CURVE_DROP;
@@ -283,9 +315,10 @@ impl World {
             .filter(|t| !keep.contains(t))
             .collect();
         for tile in unused {
-            if let Some(model) = self.tiles.remove(&tile) {
-                renderer.unload_mesh(model.mesh);
-                renderer.unload_texture(model.texture);
+            if let Some(built_tile) = self.tiles.remove(&tile) {
+                renderer.unload_mesh(built_tile.model.mesh);
+                renderer.unload_texture(built_tile.model.texture);
+                renderer.unload_texture(built_tile.normals);
             }
         }
     }
@@ -329,9 +362,18 @@ impl World {
             );
         }
 
-        // Draw terrain
+        self.draw_terrain(renderer);
+    }
+
+    /// Draw the ground the current camera can see
+    pub fn draw_terrain(&self, renderer: &RenderContext) {
+        let p = renderer.builtins.program_3d;
         renderer.uniform(p, "u_detail").set_f32(1.0);
-        self.drawn.draw(renderer);
+        let frustum = renderer.camera_frustum();
+        for (tile, model) in self.drawn.iter_frustum(&frustum) {
+            renderer.bind_texture_unit(NORMAL_UNIT, self.tiles[&tile].normals);
+            renderer.draw_mesh_textured(model.mesh, model.texture, model.transform, model.tint);
+        }
         renderer.uniform(p, "u_detail").set_f32(0.0);
     }
 
@@ -368,4 +410,31 @@ impl World {
             fix("IAF", 0.0, THRESHOLD_CROSSING_HEIGHT),
         ]
     }
+}
+
+/// RGBA pixels of the ground's normal, `n` x `n` texels one every `step` cells, from `height` at cells relative to the tile's corner.
+/// Red and green are x, blue and alpha are z, each 16 bits from -1 to 1, high byte first
+fn tile_normals(
+    height: &impl Fn(f32, f32) -> f32,
+    spacing: (f32, f32),
+    step: u32,
+    n: u32,
+) -> Vec<u8> {
+    let s = step as f32;
+    let mut pixels = Vec::with_capacity((n * n * 4) as usize);
+    for j in 0..n {
+        for i in 0..n {
+            let (x, z) = (i as f32 * s, j as f32 * s);
+
+            // Rise per meter, one texel each way
+            let dx = (height(x + s, z) - height(x - s, z)) / (2.0 * s * spacing.0);
+            let dz = (height(x, z + s) - height(x, z - s)) / (2.0 * s * spacing.1);
+            let normal = vec3(-dx, 1.0, -dz).normalize();
+
+            let encode = |v: f32| (((v * 0.5 + 0.5) * 65535.0).round() as u16).to_be_bytes(); // 8 bit bands gentle slopes at low sun
+            let ([x_hi, x_lo], [z_hi, z_lo]) = (encode(normal.x), encode(normal.z));
+            pixels.extend_from_slice(&[x_hi, x_lo, z_hi, z_lo]);
+        }
+    }
+    pixels
 }
