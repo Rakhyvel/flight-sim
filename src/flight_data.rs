@@ -20,11 +20,18 @@ pub struct FlightData {
     pub ground_speed: f32,
     /// [m/s]
     pub vertical_speed: f32,
+
     pub throttle: f32,
     pub brakes: f32,
+
     /// A point the plane is flying toward, relative to the floating origin. None when not moving
     pub flight_path_point: Option<Vec3>,
     pub nav: Option<NavData>,
+
+    /// Slip ball angle off center [rad], + = right
+    pub slip: f32,
+    /// [rad/s], + = turning right
+    pub turn_rate: f32,
 }
 
 pub struct NavData {
@@ -67,6 +74,8 @@ impl FlightData {
             brakes: controls.brakes,
             flight_path_point,
             nav: NavData::gather(plane, ground_speed, route),
+            slip: plane.slip() as f32,
+            turn_rate: plane.turn_rate() as f32,
         }
     }
 }

@@ -5,7 +5,7 @@ use super::{
     widgets::{self, Tape},
     Theme, ACCENT, DIM, FT_PER_M, GROUND, KT_PER_MS, OUTLINE, SKY, TEXT, WAYPOINT,
 };
-use crate::flight_data::FlightData;
+use crate::{flight_data::FlightData, hud::FPV};
 
 /// Half the attitude indicator's size [em]
 const R: f32 = 7.0;
@@ -70,6 +70,7 @@ pub fn draw(renderer: &RenderContext, t: &Theme, rect: Rectangle, data: &FlightD
         l.r,
         data.pitch,
         data.roll,
+        data.slip,
         nav.and_then(|n| n.target_path).map(f32::to_degrees),
     );
     draw_compass(
@@ -77,6 +78,7 @@ pub fn draw(renderer: &RenderContext, t: &Theme, rect: Rectangle, data: &FlightD
         t,
         Rectangle::new(x, top + tape_h + t.gap, 2.0 * l.r, l.heading_h),
         data.heading.to_degrees(),
+        data.turn_rate.to_degrees(),
         nav.map(|n| n.bearing.to_degrees()),
     );
     x += 2.0 * l.r + t.gap;
@@ -107,6 +109,7 @@ fn draw_attitude_indicator(
     r: f32,
     pitch: f32,
     roll: f32,
+    slip: f32,
     target_path: Option<f32>,
 ) {
     let pitch = pitch.to_degrees();
@@ -169,6 +172,59 @@ fn draw_attitude_indicator(
     renderer.pop_clip();
     renderer.draw_rect(square, 1.0, OUTLINE);
 
+    // Draw bank angle
+    let arc_r = 0.85 * r;
+    for deg in [
+        -60.0_f32, -45.0, -30.0, -20.0, -10.0, 10.0, 20.0, 30.0, 45.0, 60.0,
+    ] {
+        let dir = vec2(deg.to_radians().sin(), -deg.to_radians().cos());
+        let len = if deg.abs() == 30.0 || deg.abs() == 60.0 {
+            0.12 * r
+        } else {
+            0.07 * r
+        };
+        renderer.draw_line(
+            center + dir * arc_r,
+            center + dir * (arc_r + len),
+            1.0,
+            TEXT,
+        );
+    }
+    let s = 0.3 * t.em;
+    let top = center + vec2(0.0, -arc_r);
+    widgets::draw_outline(
+        renderer,
+        &[top, top + vec2(-s, -1.4 * s), top + vec2(s, -1.4 * s)],
+        1.0,
+        TEXT,
+    );
+
+    // Bank pointer, always pointing at the sky
+    let tip = center + sky_dir * arc_r;
+    let base = tip - sky_dir * (1.4 * s);
+    widgets::draw_outline(
+        renderer,
+        &[tip, base - along * s, base + along * s],
+        1.5,
+        ACCENT,
+    );
+
+    // Slip bar under the pointer, slides out the same side as the ball.
+    let slide = (slip.to_degrees() / 1.0).clamp(-1.0, 1.0) * 2.0 * s;
+    let near = base - sky_dir * (0.25 * s) + along * slide;
+    let far = near - sky_dir * (0.5 * s);
+    widgets::draw_outline(
+        renderer,
+        &[
+            near - along * s,
+            near + along * s,
+            far + along * (1.1 * s),
+            far - along * (1.1 * s),
+        ],
+        1.5,
+        ACCENT,
+    );
+
     // Draw the aircraft reference
     for side in [-1.0, 1.0] {
         let outer = center + vec2(side * 0.55 * r, 0.0);
@@ -189,6 +245,7 @@ fn draw_compass(
     t: &Theme,
     window: Rectangle,
     heading_deg: f32,
+    turn_rate_deg: f32,
     bug_deg: Option<f32>,
 ) {
     let px_per_deg = window.size.x / 90.0; // 45deg visible
@@ -224,6 +281,21 @@ fn draw_compass(
             );
         }
     }
+
+    // Standard rate marks: 3 deg/s for 6 seconds
+    for side in [-1.0, 1.0] {
+        let x = center.x + side * 18.0 * px_per_deg;
+        renderer.draw_line(vec2(x, bottom - 1.8 * tick), vec2(x, bottom), 1.0, TEXT);
+    }
+
+    // Where the heading will be in 6 seconds
+    let trend = (direction * turn_rate_deg * 6.0).clamp(-40.0, 40.0) * px_per_deg;
+    renderer.draw_line(
+        vec2(center.x, bottom - 1.5),
+        vec2(center.x + trend, bottom - 1.5),
+        3.0,
+        FPV,
+    );
 
     // Lubber line
     renderer.draw_line(

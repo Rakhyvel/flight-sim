@@ -21,9 +21,12 @@ const SLIP_SPEED: f64 = 0.3;
 /// Where each wing half's lift acts, as a fraction of the wingspan out from the middle
 /// (center of lift for an elliptical half wing)
 const LIFT_ARM: f64 = 0.21;
+/// How quickly the slip ball settles [1/s]
+const BALL_DAMPING: f64 = 4.0;
+/// How much of the pitch stability is left past the stall, once the tail is in the wing's wake.
+/// Lower makes spins easier to hold
+const POST_STALL_PITCH_STABILITY: f64 = 0.3;
 
-// TODO:
-// - split this off into RigidBodyState {pos, vel, orient, ang vel} and Deriv{vel, accel, ang vel, ang acc}, then define derivative() on Airplane for RK4
 pub struct Airplane {
     // State
     /// World position of the plane [m]
@@ -34,6 +37,8 @@ pub struct Airplane {
     pub orientation: DQuat,
     /// Body-space angular velocity of the plan [rad/s]
     body_angular_velocity: DVec3,
+
+    slip_ball: f64,
 
     config: AirplaneConfig,
     inertia: DMat3,
@@ -79,6 +84,7 @@ impl Airplane {
             vel: vec3(55.0, 0.0, 0.0),
             orientation: DQuat::identity(),
             body_angular_velocity: vec3(0.0, 0.0, 0.0),
+            slip_ball: 0.0,
             config,
             inertia,
             inertia_inv,
@@ -111,12 +117,17 @@ impl Airplane {
         let aero = self.calc_aero_state();
         let defl = Deflections::from_controls(controls, self.control_limits);
 
+        // TODO: engine torque and P-factor
+        let gravity = DVec3::new(0.0, -9.81, 0.0) * self.config.mass;
         let forces = self.calc_aero_forces(controls.throttle as f64, &aero, &defl);
         let torque = self.calc_aero_moments(&aero, &defl);
         let (wing_force, wing_torque) = self.calc_wing_forces(&aero, &defl);
         let (ground_force, ground_torque) = self.calc_ground_forces(controls.brakes as f64, ground);
 
-        self.integrate_translation(forces + wing_force + ground_force, dt);
+        let total = forces + wing_force + ground_force;
+
+        self.update_slip_ball(total, dt);
+        self.integrate_translation(total + gravity, dt);
         self.integrate_rotation(torque + wing_torque + ground_torque, dt);
     }
 
@@ -165,9 +176,6 @@ impl Airplane {
                 + self.config.derivs.c_side_rudder * defl.rudder;
             force += right * (aero.dynamic_pressure * self.config.wing_area * c_side);
         }
-
-        // Gravity
-        force.y -= self.config.mass * 9.81;
 
         force
     }
@@ -231,8 +239,7 @@ impl Airplane {
         let linear = self.config.zero_lift_coefficient + self.config.lift_slope * alpha;
 
         // aoa at which the linear curve hits its limit
-        let alpha_stall_pos =
-            (self.config.max_cl - self.config.zero_lift_coefficient) / self.config.lift_slope;
+        let alpha_stall_pos = self.stall_alpha();
         let alpha_stall_neg =
             (self.config.min_cl - self.config.zero_lift_coefficient) / self.config.lift_slope;
 
@@ -249,6 +256,22 @@ impl Airplane {
             self.config.min_cl + (flat_plate - self.config.min_cl) * t
         } else {
             linear
+        }
+    }
+
+    /// Angle of attack where the lift curve tops out [rad]
+    fn stall_alpha(&self) -> f64 {
+        (self.config.max_cl - self.config.zero_lift_coefficient) / self.config.lift_slope
+    }
+
+    /// Pitching moment from angle of attack. Flattens out past the stall
+    fn cm_from_alpha(&self, alpha: f64) -> f64 {
+        let cm_alpha = self.config.derivs.cm_alpha;
+        let stall = self.stall_alpha();
+        if alpha > stall {
+            cm_alpha * (stall + POST_STALL_PITCH_STABILITY * (alpha - stall))
+        } else {
+            cm_alpha * alpha
         }
     }
 
@@ -270,7 +293,8 @@ impl Airplane {
         // Moment coeffs
         let d = &self.config.derivs;
         let c_roll = d.cl_beta * beta;
-        let c_pitch = d.cm_0 + d.cm_alpha * alpha + d.cm_q * q_hat + d.cm_elevator * defl.elevator;
+        let c_pitch =
+            d.cm_0 + self.cm_from_alpha(alpha) + d.cm_q * q_hat + d.cm_elevator * defl.elevator;
         let c_yaw = d.cn_beta * beta + d.cn_r * r_hat + d.cn_rudder * defl.rudder;
 
         // Dimensional moments
@@ -380,6 +404,16 @@ impl Airplane {
         )
     }
 
+    /// Move the slip ball toward where the felt gravity points
+    fn update_slip_ball(&mut self, total_force: DVec3, dt: f64) {
+        let felt = total_force / self.config.mass;
+        let f =
+            nalgebra_glm::quat_rotate_vec3(&nalgebra_glm::quat_inverse(&self.orientation), &felt);
+        // Felt gravity is opposite the felt force, and the ball rolls that way
+        let target = (-f.z).atan2(f.y);
+        self.slip_ball += (target - self.slip_ball) * (BALL_DAMPING * dt).min(1.0);
+    }
+
     fn integrate_translation(&mut self, forces: DVec3, dt: f64) {
         let accel = forces / self.config.mass;
         self.vel += accel * dt;
@@ -437,6 +471,17 @@ impl Airplane {
 
     pub fn gear_height(&self) -> f64 {
         self.config.gear_height()
+    }
+
+    /// The slip ball's angle off center [rad], += right.
+    pub fn slip(&self) -> f64 {
+        self.slip_ball
+    }
+
+    /// How fast the heading is changing [rad/s], + = turning right
+    pub fn turn_rate(&self) -> f64 {
+        let omega = nalgebra_glm::quat_rotate_vec3(&self.orientation, &self.body_angular_velocity);
+        -omega.y // +Y is yawing right
     }
 }
 
@@ -605,6 +650,15 @@ mod tests {
     /// Where the test plane's lift curve tops out
     fn p_stall_alpha() -> f64 {
         let p = plane_at(vec3(55.0, 0.0, 0.0));
-        (p.config.max_cl - p.config.zero_lift_coefficient) / p.config.lift_slope
+        p.stall_alpha()
+    }
+
+    #[test]
+    fn ball_swings_outside_in_a_skid() {
+        // Air coming from the left, like a right skid
+        let mut p = plane_at(vec3(55.0, 0.0, -5.0));
+        let f = forces(&p, &Controls::new());
+        p.update_slip_ball(f, 1.0);
+        assert!(p.slip() < 0.0, "the ball goes to the outside (left)");
     }
 }
