@@ -1,10 +1,13 @@
-use std::error::Error;
+use std::{
+    collections::{HashMap, HashSet},
+    error::Error,
+};
 
 use apricot::{
     camera::floating_origin::FloatingOrigin,
     model_set::{Model, ModelSet},
     opengl::DrawOptions,
-    render::{assets::MeshId, lighting::ShadowPass, RenderContext},
+    render::{self, assets::MeshId, lighting::ShadowPass, RenderContext},
     terrain::chunks::{ChunkCoord, ChunkGrid},
 };
 use nalgebra_glm::{vec3, vec4, DVec2, DVec3, Mat4, Vec3};
@@ -21,6 +24,12 @@ const CHUNK_CELLS: u32 = 64;
 const LOAD_RADIUS: i32 = 32;
 /// How far a runway has to be from the edge of the map to be used [m]
 const EDGE_INSET: f64 = 200.0;
+/// How detailed chunks are by distance, (distance, step)
+const LODS: [(i32, u32); 4] = [(4, 1), (8, 2), (16, 4), (24, 8)];
+/// Step for everything past the last LOD ring
+const FARTHEST_STEP: u32 = 16;
+/// How far the skirts hang down below each chunk's edge [m]
+const SKIRT_PER_STEP: f32 = 20.0;
 
 /// The origin snaps to multiples of this [m] so it's a whole number and exact even in f32
 const ORIGIN_SNAP: f64 = 1024.0;
@@ -33,6 +42,8 @@ pub struct World {
     runway_meshes: Vec<(DVec3, MeshId, MeshId)>,
     chunk_grid: ChunkGrid,
     pub chunks: ModelSet<ChunkCoord>,
+    /// The vertex spacing each loaded chunk was built with
+    chunk_steps: HashMap<ChunkCoord, u32>,
     /// Everything is drawn relative to this
     pub origin: FloatingOrigin,
     /// Every airport and navaid on the map
@@ -113,6 +124,7 @@ impl World {
             map,
             runways,
             runway_meshes,
+            chunk_steps: HashMap::new(),
             chunk_grid: ChunkGrid::new(CHUNK_CELLS),
             chunks: ModelSet::new(),
             origin: FloatingOrigin::default(),
@@ -172,54 +184,70 @@ impl World {
     pub fn update(&mut self, renderer: &RenderContext, pos: DVec3, max_loads: usize) {
         let (sx, sz) = (self.map.geo.spacing_x, self.map.geo.spacing_z);
         let cell_pos: Vec3 = vec3((pos.x / sx) as f32, 0.0, (pos.z / sz) as f32);
+        let here = self.chunk_grid.chunk_at(cell_pos);
 
         let (w, d) = self.map.size();
         let max_cx = (w as u32).div_ceil(CHUNK_CELLS) as i32;
         let max_cz = (d as u32).div_ceil(CHUNK_CELLS) as i32;
 
-        // Closest first, and only chunks that are actually on the map
-        let wanted: Vec<ChunkCoord> = self
+        // Every chunk on the map in range, closest first, and how detailed it should be
+        let wanted: Vec<(ChunkCoord, u32)> = self
             .chunk_grid
             .chunks_near(cell_pos, LOAD_RADIUS)
             .into_iter()
             .filter(|c| c.x >= 0 && c.z >= 0 && c.x < max_cx && c.z < max_cz)
+            .map(|c| (c, lod_step(c.x - here.x, c.z - here.z)))
             .collect();
+        let in_range: HashSet<ChunkCoord> = wanted.iter().map(|&(c, _)| c).collect();
 
         // Unload anything that's dropped out of range
         let stale: Vec<ChunkCoord> = self
             .chunks
             .iter()
             .map(|(k, _)| k)
-            .filter(|k| !wanted.contains(k))
+            .filter(|k| !in_range.contains(k))
             .collect();
         for k in stale {
             if let Some(model) = self.chunks.remove(k) {
                 renderer.unload_mesh(model.mesh);
+                renderer.unload_texture(model.texture);
             }
+            self.chunk_steps.remove(&k);
         }
 
-        let missing: Vec<ChunkCoord> = wanted
+        // Build missing chunks and rebuild ones at the wrong detail
+        let todo: Vec<(ChunkCoord, u32)> = wanted
             .into_iter()
-            .filter(|&c| self.chunks.get(c).is_none())
-            .take(max_loads)
+            .filter(|(c, step)| self.chunk_steps.get(c) != Some(step)) // get the closest first
+            .take(max_loads) // only take a few to prevent lag
             .collect();
 
-        // Build a few missing chunks per frame, so flying fast doesn't cause a hitch
         let map = &self.map; // borrow just the map, so the closure doesn't borrow all of self
-        for chunk in missing {
-            let mesh = self
-                .chunk_grid
-                .mesh_smooth(chunk, |x, z| map.sample(x as i32, z as i32));
+        for (chunk, step) in todo {
+            let mesh =
+                self.chunk_grid
+                    .mesh_smooth(chunk, step, SKIRT_PER_STEP * step as f32, |x, z| {
+                        map.sample(x as i32, z as i32)
+                    });
             let mesh_id = renderer.add_mesh_data(mesh, None);
 
+            let texture = match self.chunks.remove(chunk) {
+                Some(old) => {
+                    renderer.unload_mesh(old.mesh);
+                    old.texture
+                }
+                None => {
+                    let pixels = terrain_color::chunk_texture(map, &self.chunk_grid, chunk);
+                    let texture = renderer.create_texture_rgba(CHUNK_CELLS, CHUNK_CELLS, &pixels);
+                    renderer.get_texture_from_id(texture).set_smooth(true);
+                    texture
+                }
+            };
+
             let transform = self.chunk_transform(chunk);
-
-            let pixels = terrain_color::chunk_texture(map, &self.chunk_grid, chunk);
-            let texture = renderer.create_texture_rgba(CHUNK_CELLS, CHUNK_CELLS, &pixels);
-            renderer.get_texture_from_id(texture).set_smooth(true);
-
             self.chunks
                 .insert(renderer, chunk, Model::new(mesh_id, texture, transform));
+            self.chunk_steps.insert(chunk, step);
         }
     }
 
@@ -297,4 +325,15 @@ impl World {
             fix("IAF", 0.0, THRESHOLD_CROSSING_HEIGHT),
         ]
     }
+}
+
+fn lod_step(dx: i32, dz: i32) -> u32 {
+    // Amir: You write "I love you so much, Lod"
+    // Jake: I do. I love her so much.
+    // Amir: She says nothing.
+    // Jake: Didn't have to.
+    let dist_sq = dx * dx + dz * dz;
+    LODS.iter()
+        .find(|&&(dist, _)| dist_sq < dist * dist)
+        .map_or(FARTHEST_STEP, |&(_, step)| step)
 }

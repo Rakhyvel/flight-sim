@@ -5,6 +5,12 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[profile.release]
+debug = "line-tables-only" # function names and lines for VTune, no slowdown
+
+[profile.dev.package."*"]
+opt-level = 3
+
 [dependencies]
 apricot = { path = "../apricot" }
 sdl2 = { version = "0.34.5", features = [
