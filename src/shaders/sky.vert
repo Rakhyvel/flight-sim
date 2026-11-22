@@ -7,5 +7,5 @@ out vec2 v_ndc;
 void main() {
     // Assumes we're drawing the fullscreen [-1, 1] quad
     v_ndc = a_position.xy;
-    gl_Position = vec4(a_position.xy, 0.9999, 1.0);
+    gl_Position = vec4(a_position.xy, 1.0, 1.0); // exactly at the far plane, so anything drawn wins
 }

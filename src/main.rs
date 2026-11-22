@@ -46,7 +46,7 @@ mod tiles;
 mod waypoint;
 mod world;
 
-const LOADS_PER_FRAME: usize = 4;
+const LOADS_PER_FRAME: usize = 1;
 
 /// Texture unit the atmosphere shaders read their air lookup from
 const AIR_LUT_UNIT: u32 = 2;
@@ -366,7 +366,6 @@ impl Scene for FlightSim {
         });
 
         renderer.clear(vec4(0.6, 0.8, 0.95, 1.0));
-        renderer.draw_sky(self.light.direction());
 
         self.world.draw(renderer);
 
@@ -381,6 +380,7 @@ impl Scene for FlightSim {
             &DrawOptions::default(),
         );
 
+        // Draw the plane
         renderer.draw_mesh(self.plane_mesh, plane_model, vec4(0.9, 0.9, 0.9, 1.0));
         renderer.draw_mesh(
             self.plane_trim_mesh,
@@ -388,6 +388,9 @@ impl Scene for FlightSim {
             vec4(0.2, 0.22, 0.25, 1.0),
         );
         renderer.draw_mesh(self.plane_prop_mesh, prop_model, vec4(0.2, 0.22, 0.25, 1.0));
+
+        // Draw the sky, after everything else 3d
+        renderer.draw_sky(self.light.direction());
 
         let data = FlightData::gather(&self.plane, &self.controls, &self.world, &self.route);
         self.hud.draw(renderer, &data, &self.minimap, app.fps);

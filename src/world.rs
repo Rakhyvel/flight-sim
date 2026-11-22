@@ -285,11 +285,6 @@ impl World {
     pub fn draw(&self, renderer: &RenderContext) {
         let p = renderer.builtins.program_3d;
 
-        // Draw terrain
-        renderer.uniform(p, "u_detail").set_f32(1.0);
-        self.drawn.draw(renderer);
-        renderer.uniform(p, "u_detail").set_f32(0.0);
-
         // Draw runways
         let asphalt = DrawOptions {
             depth_bias: Some((-1.0, -4.0)),
@@ -317,6 +312,11 @@ impl World {
                 &paint,
             );
         }
+
+        // Draw terrain
+        renderer.uniform(p, "u_detail").set_f32(1.0);
+        self.drawn.draw(renderer);
+        renderer.uniform(p, "u_detail").set_f32(0.0);
     }
 
     pub fn waypoint(&self, name: &str) -> Option<&Waypoint> {
