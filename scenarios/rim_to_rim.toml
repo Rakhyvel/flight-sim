@@ -1,0 +1,43 @@
+title = "Rim to rim" # pause...
+description = """
+Out of Grand Canyon Airport over the village,
+across to the North Rim and Point Imperial, down to the Confluence,
+back past the Watchtower to runway 21. Thin air, plan your climb."""
+region = "Grand Canyon"
+plane = "caravan"
+time_of_day = 16.0 # long shadows in the canyon
+land = "KGCN 21"
+
+[start]
+kind = "runway"
+runway = "KGCN 03"
+
+[[sight]]
+name = "Grand Canyon Village"
+lat = 36.0570
+lon = -112.1372
+altitude_ft = 8500
+
+[[sight]]
+name = "North Rim Lodge"
+lat = 36.1972
+lon = -112.0520
+altitude_ft = 9500
+
+[[sight]]
+name = "Point Imperial"
+lat = 36.2783
+lon = -111.9757
+altitude_ft = 10000     # 8,803 ft, the highest point on the rim
+
+[[sight]]
+name = "The Confluence"
+lat = 36.1925
+lon = -111.8008
+altitude_ft = 8500
+
+[[sight]]
+name = "Desert View Watchtower"
+lat = 36.0441
+lon = -111.8261
+altitude_ft = 9000

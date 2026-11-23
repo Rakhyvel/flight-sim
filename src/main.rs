@@ -110,7 +110,8 @@ const BRIEFING_TIME: f64 = 10.0;
 // - [ ] missions/scenarios
 //     - [ ] load from toml, title, have desc, region, ToD, plane load out, waypoints, and landing objectives
 //     - [ ] main menu that lists scenarios, using UI (move delta-horizon's UI to apricot?)
-//     - [ ] custom mission editor
+//     - [ ] custom/free-flight mission editor
+//     - [ ] scenario shuffle
 // - [ ] cockpit camera? idrc about this ngl
 // - [ ] ATIS readouts, maybe in a synthesized/phonetic voice? that'd be cool
 

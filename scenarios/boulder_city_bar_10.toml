@@ -1,0 +1,37 @@
+title = "Boulder City to Bar 10"
+description = """
+Fourteen passengers for the ranch. Over Hoover Dam and up Lake Mead,
+past the Skywalk, then across the canyon to Bar 10.
+Runway 34 is dirt, 4,000 ft long and only 40 ft wide."""
+region = "Grand Canyon"
+plane = "caravan"
+time_of_day = 9.5
+land = "1Z1 34"
+
+[start]
+kind = "runway"
+runway = "K61B 09"
+
+[[sight]]
+name = "Hoover Dam"
+lat = 36.0160
+lon = -114.7377
+altitude_ft = 4500  # Fortification Hill, 3,800 ft, is just upstream
+
+[[sight]]
+name = "Temple Bar"
+lat = 36.028
+lon = -114.330
+altitude_ft = 6500
+
+[[sight]]
+name = "Pearce Ferry"
+lat = 36.117
+lon = -113.997
+altitude_ft = 7500
+
+[[sight]]
+name = "Skywalk"
+lat = 36.0119
+lon = -113.8107
+altitude_ft = 7500

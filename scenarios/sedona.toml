@@ -1,0 +1,37 @@
+title = "Sedona red rocks"
+description = """
+Off the mesa-top runway past Bell Rock and Cathedral Rock,
+up to Devils Bridge and into Oak Creek Canyon.
+Back to Sedona runway 21, the mesa drops away on both ends."""
+region = "Grand Canyon"
+plane = "j3cub"
+time_of_day = 17.0 # sunset on the red rock
+land = "KSEZ 21"
+
+[start]
+kind = "runway"
+runway = "KSEZ 21"
+
+[[sight]]
+name = "Bell Rock"
+lat = 34.8007
+lon = -111.7646
+altitude_ft = 5500
+
+[[sight]]
+name = "Cathedral Rock"
+lat = 34.8200
+lon = -111.7934
+altitude_ft = 5500
+
+[[sight]]
+name = "Devils Bridge"
+lat = 34.9026
+lon = -111.8135
+altitude_ft = 6000
+
+[[sight]]
+name = "Slide Rock"
+lat = 34.9437
+lon = -111.7528
+altitude_ft = 6800  # Oak Creek Canyon's rims are around 6,500 ft

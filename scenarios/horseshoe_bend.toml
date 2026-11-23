@@ -1,0 +1,43 @@
+title = "Horseshoe Bend and Lake Powell"
+description = """
+Out of Page past Glen Canyon Dam and Horseshoe Bend,
+down to Navajo Bridge and Lees Ferry, then up over Lake Powell.
+Land on Page runway 15."""
+region = "Grand Canyon"
+plane = "cessna172"
+time_of_day = 10.0
+land = "KPGA 15"
+
+[start]
+kind = "runway"
+runway = "KPGA 33"
+
+[[sight]]
+name = "Glen Canyon Dam"
+lat = 36.9375
+lon = -111.4840
+altitude_ft = 6000
+
+[[sight]]
+name = "Horseshoe Bend"
+lat = 36.8790
+lon = -111.5104
+altitude_ft = 5500
+
+[[sight]]
+name = "Navajo Bridge"
+lat = 36.8170
+lon = -111.6316
+altitude_ft = 6500     # Vermilion Cliffs just west
+
+[[sight]]
+name = "Lees Ferry"
+lat = 36.8650
+lon = -111.5880
+altitude_ft = 6500
+
+[[sight]]
+name = "Lone Rock"
+lat = 37.0167
+lon = -111.5450
+altitude_ft = 7000

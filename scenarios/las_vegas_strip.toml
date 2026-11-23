@@ -1,0 +1,43 @@
+title = "The Las Vegas Strip"
+description = """
+Depart Henderson for the red rock west of town,
+then fly the Strip from the Luxor to Fremont Street.
+Land on North Las Vegas runway 30L."""
+region = "Grand Canyon"
+plane = "cessna172"
+time_of_day = 17.5
+land = "KVGT 30L"
+
+[start]
+kind = "runway"
+runway = "KHND 35L"
+
+[[sight]]
+name = "Luxor"
+lat = 36.0955
+lon = -115.1761
+altitude_ft = 4000
+
+[[sight]]
+name = "Bellagio"
+lat = 36.1126
+lon = -115.1767
+altitude_ft = 4000
+
+[[sight]]
+name = "Sphere"
+lat = 36.1207
+lon = -115.1617
+altitude_ft = 4000
+
+[[sight]]
+name = "The STRAT"
+lat = 36.1475
+lon = -115.1566
+altitude_ft = 4000 # the tower tops out at about 3,170 ft above sea level
+
+[[sight]]
+name = "Fremont Street"
+lat = 36.1707
+lon = -115.1440
+altitude_ft = 3500

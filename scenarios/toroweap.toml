@@ -1,0 +1,25 @@
+title = "Toroweap"
+description = """
+Off the dirt at Bar 10 and east to Toroweap,
+where the rim drops 3,000 ft straight to the river.
+Past Vulcan's Throne, then back to runway 34."""
+region = "Grand Canyon"
+plane = "j3cub"
+time_of_day = 8.5 # morning light into the inner gorge
+land = "1Z1 34"
+
+[start]
+kind = "runway"
+runway = "1Z1 34"
+
+[[sight]]
+name = "Toroweap Overlook"
+lat = 36.2150
+lon = -113.0570
+altitude_ft = 5500         # the rim is about 4,550 ft
+
+[[sight]]
+name = "Vulcan's Throne"
+lat = 36.2122
+lon = -113.0834
+altitude_ft = 5500
