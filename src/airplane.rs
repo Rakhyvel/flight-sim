@@ -49,6 +49,9 @@ pub struct Airplane {
     inertia: DMat3,
     inertia_inv: DMat3,
     control_limits: DVec3,
+
+    /// What touched the ground during the last update
+    contact: GroundContact,
 }
 
 struct AeroState {
@@ -76,6 +79,28 @@ impl Deflections {
     }
 }
 
+/// What touched the ground during the last update, and how hard
+#[derive(Default, Clone, Copy)]
+pub struct GroundContact {
+    /// Whether any wheel was on the ground
+    pub wheels: bool,
+    /// Fastest a wheel was moving into the ground [m/s]
+    pub wheel_speed: f64,
+    /// Fastest anything other than a wheel was moving into the ground [m/s], 0 if nothing did
+    pub airframe_speed: f64,
+}
+
+impl GroundContact {
+    /// Both together, as if they happened over one longer time
+    fn merge(self, other: Self) -> Self {
+        Self {
+            wheels: self.wheels || other.wheels,
+            wheel_speed: self.wheel_speed.max(other.wheel_speed),
+            airframe_speed: self.airframe_speed.max(other.airframe_speed),
+        }
+    }
+}
+
 const MAX_PHYSICS_STEP: f64 = 1.0 / 240.0;
 
 impl Airplane {
@@ -96,6 +121,7 @@ impl Airplane {
             inertia,
             inertia_inv,
             control_limits,
+            contact: GroundContact::default(),
         }
     }
 
@@ -113,6 +139,8 @@ impl Airplane {
         dt: f64,
         ground: &impl Fn(f64, f64) -> (f32, Vec3),
     ) {
+        self.contact = GroundContact::default();
+
         if let Some(f) = &self.config.flaps {
             let last = f.detents.len().saturating_sub(1) as i32;
             self.flap_lever = (self.flap_lever as i32 + controls.flap_step).clamp(0, last) as usize;
@@ -136,7 +164,9 @@ impl Airplane {
         let forces = self.calc_aero_forces(controls.throttle as f64, &aero, &defl);
         let torque = self.calc_aero_moments(&aero, &defl);
         let (wing_force, wing_torque) = self.calc_wing_forces(&aero, &defl);
-        let (ground_force, ground_torque) = self.calc_ground_forces(controls.brakes as f64, ground);
+        let (ground_force, ground_torque, contact) =
+            self.calc_ground_forces(controls.brakes as f64, ground);
+        self.contact = self.contact.merge(contact);
 
         let total = forces + wing_force + ground_force;
 
@@ -391,7 +421,8 @@ impl Airplane {
         &self,
         brake_fraction: f64,
         ground: &impl Fn(f64, f64) -> (f32, Vec3),
-    ) -> (DVec3, DVec3) {
+    ) -> (DVec3, DVec3, GroundContact) {
+        let mut touch = GroundContact::default();
         let weight = self.config.mass * 9.81;
 
         // Springs that hold the plane up with wheel sag of squash, with the weight shared between the wheels
@@ -427,6 +458,15 @@ impl Airplane {
             let v = self.vel + omega.cross(&arm);
             let v_n = v.dot(&n);
             let v_t = v - n * v_n; // sliding along the ground
+
+            // Note what touched and how hard
+            match contact.kind {
+                ContactKind::Wheel { .. } => {
+                    touch.wheels = true;
+                    touch.wheel_speed = touch.wheel_speed.max(-v_n);
+                }
+                ContactKind::Airframe => touch.airframe_speed = touch.airframe_speed.max(-v_n),
+            }
 
             let (k, c) = match contact.kind {
                 ContactKind::Wheel { .. } => {
@@ -481,6 +521,7 @@ impl Airplane {
         (
             force,
             nalgebra_glm::quat_rotate_vec3(&inv_orientation, &torque),
+            touch,
         )
     }
 
@@ -569,6 +610,11 @@ impl Airplane {
         let f = self.config.flaps.as_ref()?;
         let full = *f.detents.last()?;
         Some((*f.detents.get(self.flap_lever)?, self.flaps * full))
+    }
+
+    /// What touched the ground during the last `update`, and how hard
+    pub fn contact(&self) -> GroundContact {
+        self.contact
     }
 }
 

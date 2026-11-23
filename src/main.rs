@@ -11,20 +11,22 @@ use apricot::{
     render::{
         assets::{MeshId, ProgramId},
         lighting::DirectionalLight,
+        RenderContext,
     },
 };
-use nalgebra_glm::{vec2, vec3, vec4, Mat4};
+use nalgebra_glm::{vec2, vec3, vec4, I32Vec2, Mat4};
 
 use crate::{
     airplane::Airplane,
     atmosphere::Atmosphere,
-    config::AirplaneConfig,
     control::Controls,
     engine_sound::EngineSound,
     flight_data::FlightData,
     hud::Hud,
+    landing::Landing,
     minimap::Minimap,
     region::load_regions,
+    scenario::{Scenario, Start},
     waypoint::Route,
     world::{World, RENDER_DISTANCE},
 };
@@ -45,16 +47,23 @@ mod engine_sound;
 mod flight_data;
 mod heightmap;
 mod hud;
+mod landing;
 mod minimap;
 mod plane_model;
 mod region;
 mod runway_model;
+mod scenario;
 mod terrain_color;
 mod tiles;
 mod waypoint;
 mod world;
 
 const LOADS_PER_FRAME: usize = 1;
+
+/// Flown when no scenario file is given on the command line
+const DEFAULT_SCENARIO: &str = "scenarios/kahului_final.toml";
+/// How long the briefing stays up [s]
+const BRIEFING_TIME: f64 = 10.0;
 
 // todo:
 // - [x] good aero model
@@ -102,6 +111,7 @@ fn main() -> Result<(), Error> {
     run(
         AppConfig {
             title: "Flight Sim",
+            window_size: I32Vec2::new(1536, 864),
             ..Default::default()
         },
         FlightSim::new,
@@ -136,8 +146,15 @@ struct FlightSim {
     plane: Airplane,
     controls: Controls,
 
-    // TODO: some kinda mission struct
     route: Route,
+
+    scenario: Scenario,
+    /// Where `scenario` was read from, to read it again on restart
+    scenario_path: String,
+    /// Grades the landing, from the first `start`
+    judge: Option<Landing>,
+    /// Time since the scenario started [s]
+    clock: f64,
 }
 
 impl FlightSim {
@@ -186,16 +203,21 @@ impl FlightSim {
             atmosphere.connect(renderer, program);
         }
 
-        let light_dir = vec3(0.5, 0.3, 0.0).normalize();
-        let mut light = DirectionalLight::new(light_dir, 2048)?;
+        // The scenario decides where, when, and in what
+        let scenario_path = std::env::args()
+            .nth(1)
+            .unwrap_or_else(|| DEFAULT_SCENARIO.to_string());
+        let scenario = Scenario::load(&scenario_path);
+
+        let mut light = DirectionalLight::new(scenario.sun_direction(), 2048)?;
         light.frustum.shadow_distance = 150.0;
         app.renderer.set_light(Some(&light));
 
         let regions = load_regions("assets/regions.toml");
         let region = regions
             .iter()
-            .find(|r| r.name == "Tucson")
-            .expect("no region");
+            .find(|r| r.name == scenario.region)
+            .unwrap_or_else(|| panic!("no region {}", scenario.region));
         let world = World::load(renderer, region).expect("couldnt load region");
 
         let plane_model = plane_model::airplane_model();
@@ -213,28 +235,93 @@ impl FlightSim {
             engine_sound: app.audio.start_synth(EngineSound::new()),
             world,
             hud: Hud::new(&app.renderer)?,
-            minimap: Minimap::new(&app.renderer, light_dir)?,
+            minimap: Minimap::new(&app.renderer)?,
             water_program,
             sea_mesh: renderer.add_mesh_data(sea_grid(128), None),
-            plane: Airplane::new(
-                AirplaneConfig::load("assets/planes/dash8.toml").expect("should exist"),
-            ),
+            plane: Airplane::new(scenario.plane_config()),
             controls: Controls::new(),
             route: Route::new(vec![]),
+            scenario,
+            scenario_path,
+            judge: None,
+            clock: 0.0,
         };
 
-        let mut waypoints = vec![];
-        let depart_runway = sim.world.runway("KTUS 04").expect("no runway");
-        let arrive_runway = sim.world.runway("KFHU 03").expect("no runway");
-        waypoints.extend(sim.world.approach(arrive_runway));
-        sim.route = Route::new(waypoints);
-
-        let (spot, heading) = sim.world.spawn_point(depart_runway);
-        sim.plane.place(spot + vec3(0.0, 1.5, 0.0), heading);
-        sim.world.recenter(sim.plane.pos);
-        sim.world.update(renderer, sim.plane.pos, usize::MAX);
+        sim.start(renderer);
 
         Ok(sim)
+    }
+
+    /// Set everything up how the scenario starts. Reads the scenario and plane files again, so
+    /// edits show up without relaunching, except the region, which needs a relaunch
+    fn start(&mut self, renderer: &RenderContext) {
+        const M_PER_NM: f64 = 1852.0;
+        const M_PER_FT: f64 = 0.3048;
+        const MS_PER_KT: f64 = 0.514444;
+        const APPROACH_THROTTLE: f32 = 0.4; // keeps a light plane on a 3 degree slope, roughly
+
+        // Fresh scenario, sun, and plane
+        let scenario = Scenario::load(&self.scenario_path);
+        if scenario.region != self.scenario.region {
+            eprintln!("changing to {} needs a relaunch", scenario.region);
+        }
+        self.scenario = scenario;
+        self.light
+            .frustum
+            .set_direction(self.scenario.sun_direction());
+        renderer.set_light(Some(&self.light));
+        self.plane = Airplane::new(self.scenario.plane_config());
+        self.engine_rpm = 700.0;
+
+        // Place the plane
+        let land = self
+            .world
+            .runway(&self.scenario.land)
+            .unwrap_or_else(|| panic!("no runway {}", self.scenario.land));
+        let strip = self.world.strip(land);
+        let airborne = match &self.scenario.start {
+            Start::Runway { runway } => {
+                let runway = self
+                    .world
+                    .runway(runway)
+                    .unwrap_or_else(|| panic!("no runway {runway}"));
+                let (spot, heading) = self.world.spawn_point(runway);
+                self.plane.place(spot + vec3(0.0, 1.5, 0.0), heading);
+                self.controls.throttle = 0.0;
+                false
+            }
+            &Start::Final {
+                distance_nm,
+                height_ft,
+                speed_kt,
+            } => {
+                let spot = strip.threshold - strip.dir * distance_nm * M_PER_NM;
+                let (ground, _) = self.world.ground(strip.threshold.x, strip.threshold.y);
+                self.plane.place(
+                    vec3(spot.x, ground as f64 + height_ft * M_PER_FT, spot.y),
+                    strip.heading(),
+                );
+                self.plane.vel = vec3(strip.dir.x, 0.0, strip.dir.y) * speed_kt * MS_PER_KT;
+                self.controls.throttle = APPROACH_THROTTLE;
+                true
+            }
+        };
+
+        // Route to the runway, minus fixes already behind an airborne start
+        let here = vec2(self.plane.pos.x, self.plane.pos.z);
+        let route = self
+            .world
+            .approach(land)
+            .into_iter()
+            .filter(|w| !airborne || (w.pos - here).dot(&strip.dir) > 0.0)
+            .collect();
+        self.route = Route::new(route);
+        self.judge = Some(Landing::new(strip, airborne));
+        self.clock = 0.0;
+
+        // Ground around the new spot, all at once
+        self.world.recenter(self.plane.pos);
+        self.world.update(renderer, self.plane.pos, usize::MAX);
     }
 }
 
@@ -242,6 +329,17 @@ impl Scene for FlightSim {
     fn update(&mut self, app: &App) -> SceneCommand {
         if app.input.key_pressed(Scancode::Tab) {
             app.set_cursor_captured(!app.cursor_captured());
+        }
+
+        let dt = app.dt.as_secs_f64();
+
+        // Scenario judgements
+        if app.input.key_pressed(Scancode::R) {
+            self.start(&app.renderer);
+        }
+        self.clock += dt;
+        if let Some(judge) = &mut self.judge {
+            judge.update(&self.plane, dt);
         }
 
         self.controls.update_input(&app.input, app.dt.as_secs_f32());
@@ -254,7 +352,6 @@ impl Scene for FlightSim {
             .update(&app.renderer, self.plane.pos, LOADS_PER_FRAME);
         self.route.update(self.plane.pos);
 
-        let dt = app.dt.as_secs_f64();
         // For fixed speed props
         // TODO: Configurable?!
         let target_rpm =
@@ -395,7 +492,13 @@ impl Scene for FlightSim {
         renderer.draw_sky(self.light.direction());
 
         let data = FlightData::gather(&self.plane, &self.controls, &self.world, &self.route);
-        self.hud.draw(renderer, &data, &self.minimap, app.fps);
+        let notice = match self.judge.as_ref().and_then(Landing::debrief) {
+            Some(debrief) => Some(debrief),
+            None if self.clock < BRIEFING_TIME => Some(self.scenario.briefing()),
+            None => None,
+        };
+        self.hud
+            .draw(renderer, &data, &self.minimap, app.fps, notice.as_ref());
     }
 }
 

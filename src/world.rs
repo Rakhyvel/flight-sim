@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
+    f64::consts::TAU,
 };
 
 use apricot::{
@@ -14,7 +15,7 @@ use apricot::{
         RenderContext,
     },
 };
-use nalgebra_glm::{vec3, vec4, DVec2, DVec3, Mat4, Vec3, Vec4};
+use nalgebra_glm::{vec2, vec3, vec4, DVec2, DVec3, Mat4, Vec3, Vec4};
 
 use crate::{
     airport::{self, Airport, Navaid, Runway},
@@ -392,6 +393,18 @@ impl World {
         self.waypoints.iter().find(|w| w.name == name)
     }
 
+    /// Where the runway lies on the map
+    pub fn strip(&self, runway: &Runway) -> Strip {
+        let a = self.map.geo.to_world(runway.start.0, runway.start.1);
+        let b = self.map.geo.to_world(runway.end.0, runway.end.1);
+        Strip {
+            threshold: a,
+            dir: (b - a).normalize(),
+            length: (b - a).norm(),
+            width: runway.width as f64,
+        }
+    }
+
     /// Generate a straight-in approach to a runway
     pub fn approach(&self, runway: &Runway) -> Vec<Waypoint> {
         const M_PER_NM: f64 = 1852.0;
@@ -418,8 +431,40 @@ impl World {
         vec![
             fix("IAF", INITIAL_FIX_OUT, INITIAL_FIX_HEIGHT),
             fix("FAF", FINAL_APPROACH_OUT, final_approach_height),
-            fix("IAF", 0.0, THRESHOLD_CROSSING_HEIGHT),
+            fix("THR", 0.0, THRESHOLD_CROSSING_HEIGHT),
         ]
+    }
+}
+
+// TODO: Move to airport.rs?
+/// A runway laid out on the map
+#[derive(Clone, Copy)]
+pub struct Strip {
+    /// Middle of the end you land from, world (x, z) [m]
+    pub threshold: DVec2,
+    /// Unit vector down the runway, world (x, z)
+    pub dir: DVec2,
+    pub length: f64,
+    pub width: f64,
+}
+
+impl Strip {
+    /// World (x, z) `p` as (how far past the threshold, how far right of the centerline) [m]
+    pub fn local(&self, p: DVec2) -> DVec2 {
+        let d = p - self.threshold;
+        let right = vec2(-self.dir.y, self.dir.x); // east when runway points north
+        vec2(d.dot(&self.dir), d.dot(&right))
+    }
+
+    /// Whether world (x, z) `p` is on the pavement
+    pub fn contains(&self, p: DVec2) -> bool {
+        let l = self.local(p);
+        (0.0..=self.length).contains(&l.x) && l.y.abs() <= self.width / 2.0
+    }
+
+    /// The compass heading of the runway [rad]
+    pub fn heading(&self) -> f64 {
+        self.dir.x.atan2(-self.dir.y).rem_euclid(TAU)
     }
 }
 

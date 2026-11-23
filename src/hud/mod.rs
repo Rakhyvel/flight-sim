@@ -31,6 +31,7 @@ const WAYPOINT: Vec4 = Vec4::new(0.9, 0.4, 1.1, 1.0); // we are all children of 
 const FPV: Vec4 = Vec4::new(0.3, 1.0, 0.4, 1.0);
 const HALO: Vec4 = Vec4::new(0.0, 0.0, 0.0, 0.8);
 const STRIP: Vec4 = Vec4::new(0.0, 0.0, 0.0, 0.75);
+const BAD: Vec4 = Vec4::new(1.0, 0.35, 0.3, 1.0);
 
 // Display units
 const FT_PER_M: f32 = 3.28084;
@@ -76,6 +77,21 @@ impl Theme {
     }
 }
 
+/// How a line on a notice reads
+#[derive(Clone, Copy)]
+pub enum Mood {
+    Plain,
+    Good,
+    Warn,
+    Bad,
+}
+
+/// A panel of text in the middle of the screen
+pub struct Notice {
+    pub title: String,
+    pub lines: Vec<(String, Mood)>,
+}
+
 /// Body text size for a window. Whole pixels, so the fonts only rebuild when it really changes
 fn em_for(w: f32, h: f32) -> f32 {
     // Short windows go by height, narrow ones by width
@@ -103,6 +119,7 @@ impl Hud {
         data: &FlightData,
         minimap: &Minimap,
         fps: impl Display,
+        notice: Option<&Notice>,
     ) {
         let screen = renderer.screen_size();
         let (w, h) = (screen.x as f32, screen.y as f32);
@@ -152,5 +169,53 @@ impl Hud {
             &format!("{fps} FPS"),
             DIM,
         );
+
+        // Middle, over everything
+        if let Some(notice) = notice {
+            draw_notice(renderer, t, w, h, notice);
+        }
+    }
+}
+
+/// `notice` centered across a `w` x `h` screen, a little above the middle
+fn draw_notice(renderer: &RenderContext, t: &Theme, w: f32, h: f32, notice: &Notice) {
+    // Size it to fit
+    let line_h = (1.4 * t.em).round();
+    renderer.set_font(t.value);
+    let title = renderer.measure_text(&notice.title);
+    renderer.set_font(t.body);
+    let widest = notice
+        .lines
+        .iter()
+        .map(|(text, _)| renderer.measure_text(text).x)
+        .fold(title.x, f32::max);
+    let size = vec2(
+        widest + 2.0 * t.pad,
+        title.y + t.gap + line_h * notice.lines.len() as f32 + 2.0 * t.pad,
+    );
+    let rect = Rectangle::new(
+        ((w - size.x) / 2.0).round(),
+        (0.3 * h).round(),
+        size.x,
+        size.y,
+    );
+    widgets::draw_plate(renderer, rect);
+
+    // Title, then each line
+    let x = rect.pos.x + t.pad;
+    let mut y = rect.pos.y + t.pad;
+    renderer.set_font(t.value);
+    renderer.draw_text(vec2(x, y), &notice.title, TEXT);
+    y += title.y + t.gap;
+    renderer.set_font(t.body);
+    for (text, mood) in &notice.lines {
+        let color = match mood {
+            Mood::Plain => TEXT,
+            Mood::Good => FPV,
+            Mood::Warn => ACCENT,
+            Mood::Bad => BAD,
+        };
+        renderer.draw_text(vec2(x, y), text, color);
+        y += line_h;
     }
 }

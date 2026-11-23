@@ -1,0 +1,15 @@
+title = "Golden hour into Kahului"
+description = """
+Three miles out on final for runway 02.
+Fly the approach, touch down in the first third,
+and stop on the runway."""
+region = "Maui"
+plane = "cessna172"
+time_of_day = 17.5
+land = "PHOG 02"
+
+[start]
+kind = "final"
+distance_nm = 3.0
+height_ft = 950
+speed_kt = 70

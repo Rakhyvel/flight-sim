@@ -1,0 +1,13 @@
+title = "Tucson to Fort Huachuca"
+description = """
+Take off from Tucson runway 04
+and follow the magenta line to Libby Army Airfield.
+Land on runway 03."""
+region = "Tucson"
+plane = "cessna172"
+time_of_day = 9.0
+land = "KFHU 03"
+
+[start]
+kind = "runway"
+runway = "KTUS 04"

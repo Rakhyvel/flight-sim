@@ -296,11 +296,6 @@ impl TileTree {
             out.extend(kids.into_iter().filter(|&c| loaded(c)))
         }
     }
-
-    /// Whether or not a tile is underwater
-    fn underwater(&self, tile: Tile) -> bool {
-        self.heights.get(tile).is_none_or(|h| h.peak <= 0.0)
-    }
 }
 
 #[cfg(test)]

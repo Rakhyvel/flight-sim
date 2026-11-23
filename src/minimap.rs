@@ -3,7 +3,7 @@ use apricot::{
     error::Error,
     render::{assets::ProgramId, target::RenderTarget, RenderContext},
 };
-use nalgebra_glm::{vec3, vec4, Vec3};
+use nalgebra_glm::{vec3, vec4};
 
 use crate::{airplane::Airplane, world::World};
 
@@ -21,7 +21,7 @@ pub struct Minimap {
 }
 
 impl Minimap {
-    pub fn new(renderer: &RenderContext, light_dir: Vec3) -> Result<Self, Error> {
+    pub fn new(renderer: &RenderContext) -> Result<Self, Error> {
         let minimap = renderer.create_render_target(MINIMAP_PX)?;
         renderer
             .get_texture_from_id(minimap.texture)
@@ -40,7 +40,7 @@ impl Minimap {
         })
     }
 
-    /// Draw the map around `plane`, turned so it poitns up, with the sea placed by `sea`
+    /// Draw the map around `plane`, turned so it points up
     pub fn render(&mut self, renderer: &RenderContext, plane: &Airplane, world: &World) {
         // Only draw every couple frames or so to reduce lag
         let due = self.frame % REDRAW_EVERY == 0;
