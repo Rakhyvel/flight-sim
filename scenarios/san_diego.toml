@@ -1,0 +1,55 @@
+title = "San Diego Bay"
+description = """
+Off Lindbergh Field and around Point Loma.
+Coronado, the Midway, Balboa Park, then up the coast
+to La Jolla and Torrey Pines. Land at Montgomery 10L."""
+region = "SoCal"
+plane = "cessna172"
+time_of_day = 10.0
+land = "KMYF 10L"
+
+[start]
+kind = "runway"
+runway = "KSAN 27"
+
+[[sight]]
+name = "Cabrillo Lighthouse"
+lat = 32.6722
+lon = -117.2410
+altitude_ft = 1500           # on the Point Loma ridge, about 420 ft
+
+[[sight]]
+name = "Hotel del Coronado"
+lat = 32.6808
+lon = -117.1785
+altitude_ft = 1500
+
+[[sight]]
+name = "Coronado Bridge"
+lat = 32.6896
+lon = -117.1520
+altitude_ft = 1500
+
+[[sight]]
+name = "USS Midway"
+lat = 32.7137
+lon = -117.1751
+altitude_ft = 1500
+
+[[sight]]
+name = "Balboa Park"
+lat = 32.7316
+lon = -117.1524
+altitude_ft = 1500
+
+[[sight]]
+name = "La Jolla Cove"
+lat = 32.8505
+lon = -117.2713
+altitude_ft = 1500
+
+[[sight]]
+name = "Torrey Pines Gliderport"
+lat = 32.8899
+lon = -117.2510
+altitude_ft = 1500               # on the cliffs, about 330 ft

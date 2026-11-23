@@ -1,0 +1,43 @@
+title = "Yosemite Valley"
+description = """
+Climb out of Mariposa to Tunnel View,
+then along the rim past El Capitan and Yosemite Falls.
+Up to Half Dome, Glacier Point, and back to runway 26."""
+region = "NorCal"
+plane = "caravan"
+time_of_day = 15.5 # afternoon sun on Half Dome's face
+land = "KMPI 26"
+
+[start]
+kind = "runway"
+runway = "KMPI 26"
+
+[[sight]]
+name = "Tunnel View"
+lat = 37.7156
+lon = -119.6773
+altitude_ft = 7500   # ridges up to about 6,450 ft on the climb
+
+[[sight]]
+name = "El Capitan"
+lat = 37.7340
+lon = -119.6377
+altitude_ft = 8500  # summit is about 7,570 ft
+
+[[sight]]
+name = "Yosemite Falls"
+lat = 37.7568
+lon = -119.5965
+altitude_ft = 8500
+
+[[sight]]
+name = "Half Dome"
+lat = 37.7459
+lon = -119.5332
+altitude_ft = 10000 # 8,839 ft
+
+[[sight]]
+name = "Glacier Point"
+lat = 37.7306
+lon = -119.5745
+altitude_ft = 9000

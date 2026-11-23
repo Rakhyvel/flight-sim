@@ -17,3 +17,11 @@ tiff = "tucson.tif"
 [[regions]]
 name = "Grand Canyon"
 tiff = "grand_canyon.tif"
+
+[[regions]]
+name = "SoCal"
+tiff = "socal.tif"
+
+[[regions]]
+name = "NorCal"
+tiff = "norcal.tif"

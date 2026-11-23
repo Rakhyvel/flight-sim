@@ -1,0 +1,37 @@
+title = "Airport in the Sky"
+description = """
+Depart Torrance, past Point Vicente and out across
+the channel to Avalon. Around to Two Harbors,
+then up onto Catalina's mountaintop runway 04."""
+region = "SoCal"
+plane = "cessna172"
+time_of_day = 11.0
+land = "KAVX 04"
+
+[start]
+kind = "runway"
+runway = "KTOA 29R"
+
+[[sight]]
+name = "Point Vicente Lighthouse"
+lat = 33.7420
+lon = -118.4110
+altitude_ft = 1500
+
+[[sight]]
+name = "Avalon"
+lat = 33.3486
+lon = -118.3247
+altitude_ft = 2500
+
+[[sight]]
+name = "Two Harbors"
+lat = 33.4430
+lon = -118.4985
+altitude_ft = 2500   # the ridge on the way is about 1,600 ft
+
+[[sight]]
+name = "Little Harbor"
+lat = 33.3856
+lon = -118.4740
+altitude_ft = 2500     # sets up a short final; the field is 1,602 ft

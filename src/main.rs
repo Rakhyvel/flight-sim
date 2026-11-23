@@ -78,8 +78,9 @@ const BRIEFING_TIME: f64 = 10.0;
 //     - [x] mini map that's stylized like a real map
 //     - [ ] zoom in and out with [ and ]
 //     - [ ] able to program and override routes and stuff
-//     - [ ] water above sea level
+//     - [ ] water above sea level, I feel like _i_ can tell where there should be water, it's really flat and in a valley, so hopefully an algorithm can too
 //     - [ ] seamless flight between two regions' tiffs
+//     - [ ] climate, so that AZ is hot/dry, CA/CO is cool/dry, HI is hot/wet
 // - [ ] weather, wind, time of day
 //     - [x] distance haze, fog
 //     - [ ] Higher LOD shadow maps for the airplane, maybe cascading shadow maps

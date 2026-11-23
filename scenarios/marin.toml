@@ -1,0 +1,37 @@
+title = "Marin and the Gate"
+description = """
+Out of Gnoss Field and over Mount Tamalpais,
+down to the Golden Gate Bridge, around Alcatraz
+and Angel Island, then home to runway 31."""
+region = "NorCal"
+plane = "j3cub"
+time_of_day = 10.0
+land = "KDVO 31"
+
+[start]
+kind = "runway"
+runway = "KDVO 13"
+
+[[sight]]
+name = "Mount Tamalpais"
+lat = 37.9293
+lon = -122.5780
+altitude_ft = 3500       # 2,571 ft
+
+[[sight]]
+name = "Golden Gate Bridge"
+lat = 37.8199
+lon = -122.4783
+altitude_ft = 1500
+
+[[sight]]
+name = "Alcatraz"
+lat = 37.8267
+lon = -122.4230
+altitude_ft = 1000
+
+[[sight]]
+name = "Angel Island"
+lat = 37.8609
+lon = -122.4326
+altitude_ft = 1500    # Mount Livermore is 788 ft

@@ -1,0 +1,49 @@
+title = "San Francisco Bay"
+description = """
+North up the coast from Half Moon Bay past Mavericks.
+Ocean Beach, under the clouds at the Golden Gate,
+Alcatraz, downtown, the Bay Bridge. Land Oakland 10R."""
+region = "NorCal"
+plane = "cessna172"
+time_of_day = 15.0
+land = "KOAK 10R"
+
+[start]
+kind = "runway"
+runway = "KHAF 30"
+
+[[sight]]
+name = "Mavericks"
+lat = 37.4936
+lon = -122.4967
+altitude_ft = 1000
+
+[[sight]]
+name = "Cliff House"
+lat = 37.7785
+lon = -122.5137
+altitude_ft = 1500   # Montara Mountain's shoulder is about 1,000 ft on the way
+
+[[sight]]
+name = "Golden Gate Bridge"
+lat = 37.8199
+lon = -122.4783
+altitude_ft = 1500          # towers are 746 ft
+
+[[sight]]
+name = "Alcatraz"
+lat = 37.8267
+lon = -122.4230
+altitude_ft = 1500
+
+[[sight]]
+name = "Salesforce Tower"
+lat = 37.7897
+lon = -122.3972
+altitude_ft = 2000        # 1,070 ft tall
+
+[[sight]]
+name = "Bay Bridge"
+lat = 37.7983
+lon = -122.3778
+altitude_ft = 1500

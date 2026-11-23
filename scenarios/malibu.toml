@@ -1,0 +1,37 @@
+title = "Malibu coast"
+description = """
+Low and slow down the coast from Camarillo,
+past Point Mugu, Point Dume and the Malibu pier.
+Land at Santa Monica runway 03."""
+region = "SoCal"
+plane = "j3cub"
+time_of_day = 16.5 # sun low over the water
+land = "KSMO 03"
+
+[start]
+kind = "runway"
+runway = "KCMA 26"
+
+[[sight]]
+name = "Point Mugu"
+lat = 34.0864
+lon = -119.0656
+altitude_ft = 1500  # hills up to about 1,000 ft on the way
+
+[[sight]]
+name = "Point Dume"
+lat = 34.0011
+lon = -118.8064
+altitude_ft = 1000
+
+[[sight]]
+name = "Malibu Pier"
+lat = 34.0378
+lon = -118.6773
+altitude_ft = 1000
+
+[[sight]]
+name = "Santa Monica Pier"
+lat = 34.0094
+lon = -118.4973
+altitude_ft = 800          # about 3 km from the threshold, so start down

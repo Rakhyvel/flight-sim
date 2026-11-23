@@ -1,0 +1,49 @@
+title = "LA from the air"
+description = """
+Depart Santa Monica over the pier, then the Getty,
+the Hollywood Sign and Griffith Observatory.
+Downtown, then back to Santa Monica runway 21."""
+region = "SoCal"
+plane = "cessna172"
+time_of_day = 17.0 # golden hour on the hills
+land = "KSMO 21"
+
+[start]
+kind = "runway"
+runway = "KSMO 21"
+
+[[sight]]
+name = "Santa Monica Pier"
+lat = 34.0094
+lon = -118.4973
+altitude_ft = 1500
+
+[[sight]]
+name = "Getty Center"
+lat = 34.0780
+lon = -118.4741
+altitude_ft = 2500    # on a hilltop at about 830 ft
+
+[[sight]]
+name = "Hollywood Sign"
+lat = 34.1341
+lon = -118.3215
+altitude_ft = 3000      # Mount Lee is about 1,700 ft
+
+[[sight]]
+name = "Griffith Observatory"
+lat = 34.1184
+lon = -118.3004
+altitude_ft = 2500
+
+[[sight]]
+name = "Dodger Stadium"
+lat = 34.0739
+lon = -118.2400
+altitude_ft = 2000
+
+[[sight]]
+name = "Downtown"
+lat = 34.0511
+lon = -118.2541
+altitude_ft = 2500 # the US Bank Tower tops out around 1,450 ft MSL

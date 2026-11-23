@@ -1,0 +1,31 @@
+title = "Monterey Bay"
+description = """
+Depart Watsonville for the Santa Cruz boardwalk,
+then straight across the bay to the aquarium
+and the Lone Cypress. Land Monterey 10R."""
+region = "NorCal"
+plane = "cessna172"
+time_of_day = 12.0
+land = "KMRY 10R"
+
+[start]
+kind = "runway"
+runway = "KWVI 27"
+
+[[sight]]
+name = "Santa Cruz Boardwalk"
+lat = 36.9640
+lon = -122.0177
+altitude_ft = 1500
+
+[[sight]]
+name = "Monterey Bay Aquarium"
+lat = 36.6182
+lon = -121.9015
+altitude_ft = 1500
+
+[[sight]]
+name = "Lone Cypress"
+lat = 36.5688
+lon = -121.9653
+altitude_ft = 1500
