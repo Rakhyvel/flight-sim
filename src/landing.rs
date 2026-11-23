@@ -56,6 +56,8 @@ impl Grade {
 /// The moment the wheels met the ground
 #[derive(Clone, Copy)]
 struct Touchdown {
+    /// Index into `Landing::runways` of the one it came down on, the target if it missed them all
+    runway: usize,
     /// How fast the wheels came down [m/s]
     sink_rate: f64,
     /// How far past the threshold, and how far right of the centerline [m]
@@ -80,21 +82,32 @@ enum Phase {
 
 /// Grades a landing on a runway
 pub struct Landing {
-    strip: Strip,
+    /// Every runway on the map by name, to tell which one the plane came down on
+    runways: Vec<(String, Strip)>,
+    /// Index in `runways` of the one to land on
+    target: usize,
     phase: Phase,
+    /// Times the airframe has touched the ground
+    scrapes: u32,
+    /// Time since the airframe last touched the ground [s]
+    since_scrape: f64,
 }
 
 impl Landing {
     /// Watch for a landing on `strip`, by a plane starting in the air or on the ground
-    pub fn new(strip: Strip, airborne: bool) -> Self {
-        Self {
-            strip,
+    pub fn new(target: &str, runways: Vec<(String, Strip)>, airborne: bool) -> Option<Self> {
+        let target = runways.iter().position(|(name, _)| name == target)?;
+        Some(Self {
+            runways,
+            target,
             phase: if airborne {
                 Phase::Flying(AIRBORNE_TIME)
             } else {
                 Phase::Departing
             },
-        }
+            scrapes: 0,
+            since_scrape: f64::INFINITY,
+        })
     }
 
     /// Follow `plane` through the last `dt` [s]
@@ -115,6 +128,16 @@ impl Landing {
             _ => {}
         }
 
+        // Count each time the airframe touches, not each frame it drags
+        if contact.airframe {
+            if self.since_scrape > BOUNCE_TIME {
+                self.scrapes += 1;
+            }
+            self.since_scrape = 0.0;
+        } else {
+            self.since_scrape += dt;
+        }
+
         // transition the phase depending on the plane's state
         self.phase = match self.phase {
             Phase::Departing if !contact.wheels => Phase::Flying(0.0),
@@ -132,7 +155,7 @@ impl Landing {
                     td.bounces += 1;
                 }
                 if ground_speed < STOPPED_SPEED {
-                    Phase::Landed(td, self.strip.contains(here))
+                    Phase::Landed(td, self.runways[td.runway].1.contains(here))
                 } else {
                     Phase::Rolling(td, 0.0)
                 }
@@ -156,7 +179,8 @@ impl Landing {
             }
             _ => return None,
         };
-        let s = &self.strip;
+        let (name, s) = &self.runways[td.runway];
+        let wrong = td.runway != self.target;
 
         // Grade each part
         let sink_fpm = td.sink_rate * FT_PER_M * 60.0;
@@ -168,6 +192,15 @@ impl Landing {
         };
         let crab_deg = td.crab.to_degrees().abs();
         let rows = [
+            (
+                "Runway",
+                if wrong {
+                    format!("{name}, not {}", self.runways[self.target].0)
+                } else {
+                    name.clone()
+                },
+                if wrong { Grade::Fail } else { Grade::Butter },
+            ),
             (
                 "Sink rate",
                 format!("{sink_fpm:.0} fpm"),
@@ -202,6 +235,11 @@ impl Landing {
                 Grade::by(td.bounces as f64, 0.0, 1.0, 3.0),
             ),
             (
+                "Scrapes",
+                self.scrapes.to_string(),
+                Grade::by(self.scrapes as f64, 0.0, 0.0, 1.0),
+            ),
+            (
                 "Stopped",
                 if stopped_on_runway {
                     "on the runway"
@@ -223,9 +261,10 @@ impl Landing {
             .map(|r| r.2)
             .fold(Grade::Butter, |a, b| if b > a { b } else { a });
         let title = match worst {
+            _ if wrong => "Advise ready to copy a phone number",
             Grade::Butter => "Butter!",
             Grade::Good => "Nice landing",
-            Grade::Poor => "Advise ready to copy a phone number",
+            Grade::Poor => "Could be worse",
             Grade::Fail => "Any landing you can walk away from...",
         };
         let mut lines: Vec<(String, Mood)> = rows
@@ -240,11 +279,35 @@ impl Landing {
     }
 
     fn touchdown(&self, plane: &Airplane, sink_rate: f64) -> Touchdown {
+        let here = vec2(plane.pos.x, plane.pos.z);
+        let heading = plane.heading();
+
+        // Grade against the runway it came down on, or the target if it missed them all
+        let runway = self.runway_at(here, heading).unwrap_or(self.target);
+        let strip = &self.runways[runway].1;
+
         Touchdown {
+            runway,
             sink_rate,
-            spot: self.strip.local(vec2(plane.pos.x, plane.pos.z)),
-            crab: (plane.heading() - self.strip.heading() + PI).rem_euclid(TAU) - PI,
+            spot: strip.local(here),
+            crab: angle_off(heading, strip.heading()),
             bounces: 0,
         }
     }
+
+    /// Get the index of the runway at `p` with heading closest to `heading`
+    fn runway_at(&self, p: DVec2, heading: f64) -> Option<usize> {
+        let off = |s: &Strip| angle_off(heading, s.heading()).abs();
+        self.runways
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, s))| s.contains(p))
+            .min_by(|(_, (_, a)), (_, (_, b))| off(a).total_cmp(&off(b)))
+            .map(|(i, _)| i)
+    }
+}
+
+/// `a` minus `b`, wrapped to -pi..pi [rad]
+fn angle_off(a: f64, b: f64) -> f64 {
+    (a - b + PI).rem_euclid(TAU) - PI
 }

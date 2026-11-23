@@ -88,6 +88,8 @@ pub struct GroundContact {
     pub wheel_speed: f64,
     /// Fastest anything other than a wheel was moving into the ground [m/s], 0 if nothing did
     pub airframe_speed: f64,
+    /// Whether anything other than a wheel was on the ground
+    pub airframe: bool,
 }
 
 impl GroundContact {
@@ -97,6 +99,7 @@ impl GroundContact {
             wheels: self.wheels || other.wheels,
             wheel_speed: self.wheel_speed.max(other.wheel_speed),
             airframe_speed: self.airframe_speed.max(other.airframe_speed),
+            airframe: self.airframe || other.airframe,
         }
     }
 }
@@ -465,7 +468,10 @@ impl Airplane {
                     touch.wheels = true;
                     touch.wheel_speed = touch.wheel_speed.max(-v_n);
                 }
-                ContactKind::Airframe => touch.airframe_speed = touch.airframe_speed.max(-v_n),
+                ContactKind::Airframe => {
+                    touch.airframe = true;
+                    touch.airframe_speed = touch.airframe_speed.max(-v_n);
+                }
             }
 
             let (k, c) = match contact.kind {

@@ -405,6 +405,14 @@ impl World {
         }
     }
 
+    /// Every runway on the map by name, laid out
+    pub fn strips(&self) -> Vec<(String, Strip)> {
+        self.runways
+            .iter()
+            .map(|r| (r.name.clone(), self.strip(r)))
+            .collect()
+    }
+
     /// Generate a straight-in approach to a runway
     pub fn approach(&self, runway: &Runway) -> Vec<Waypoint> {
         const M_PER_NM: f64 = 1852.0;

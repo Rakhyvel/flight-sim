@@ -316,7 +316,7 @@ impl FlightSim {
             .filter(|w| !airborne || (w.pos - here).dot(&strip.dir) > 0.0)
             .collect();
         self.route = Route::new(route);
-        self.judge = Some(Landing::new(strip, airborne));
+        self.judge = Landing::new(&self.scenario.land, self.world.strips(), airborne);
         self.clock = 0.0;
 
         // Ground around the new spot, all at once
