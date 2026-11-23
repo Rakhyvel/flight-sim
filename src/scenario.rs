@@ -1,4 +1,4 @@
-use std::f64::consts::PI;
+use std::{collections::HashMap, f64::consts::PI};
 
 use nalgebra_glm::{vec3, Vec3};
 use serde::Deserialize;
@@ -16,6 +16,12 @@ pub struct Scenario {
     pub region: String,
     /// File name in assets/planes, without the .toml
     pub plane: String,
+    /// How full the tanks start, 0 to 1
+    #[serde(default = "full_tanks")]
+    pub fuel_fraction: f64,
+    /// Load on the plane's stations by name [kg]
+    #[serde(default)]
+    pub station_loads: HashMap<String, f64>,
     /// Local solar time [h]
     pub time_of_day: f64,
     pub start: Start,
@@ -24,6 +30,10 @@ pub struct Scenario {
     /// Landmarks to fly past in order
     #[serde(default, rename = "sight")]
     pub sights: Vec<Sight>,
+}
+
+fn full_tanks() -> f64 {
+    1.0
 }
 
 /// Where the plane is when the scenario begins

@@ -1,0 +1,97 @@
+name = "DHC-6 Twin Otter"
+empty_mass = 3360.0                                                # about 7,400 lb
+empty_cg = [-0.162, 0.0, 0.0]                                      # puts the CG on the origin with the crew aboard
+empty_inertia = { roll = 11800.0, yaw = 48000.0, pitch = 41000.0 }
+wing_area = 39.0
+wingspan = 19.8
+mean_chord = 1.98
+lift_slope = 5.2                                                   # aspect ratio 10
+zero_lift_coefficient = 0.3
+max_cl = 1.6                                                       # about 74 kt stall clean at max gross
+min_cl = -0.8
+drag_coefficient_base = 0.034                                      # fixed gear, struts, a boxy fuselage
+oswald_efficiency = 0.75
+cy_beta = -0.5
+
+max_thrust = 16000.0
+max_power = 925000.0   # 2 x 620 shp PT6A-27
+fuel_kg_per_kwh = 0.40 # about 600 lb/h at cruise
+prop_efficiency = 0.8
+
+control_limits = { elevator = 22.0, aileron = 17.0, rudder = 22.0 }
+
+contacts = [
+    # Mains on the long-stroke legs, 3.7 m apart
+    { kind = "wheel", pos = [-0.4, -1.6, -1.85], radius = 0.4, brakes = true },
+    { kind = "wheel", pos = [-0.4, -1.6, 1.85], radius = 0.4, brakes = true },
+    # Nose wheel, well forward under the long nose
+    { kind = "wheel", pos = [4.4, -1.65, 0.0], radius = 0.3 },
+    # Wingtips
+    { kind = "airframe", pos = [0.0, 1.6, -9.9] },
+    { kind = "airframe", pos = [0.0, 1.6, 9.9] },
+    # Tail cone, stab tips, top of the fin
+    { kind = "airframe", pos = [-8.5, -0.3, 0.0] },
+    { kind = "airframe", pos = [-8.8, 0.6, -3.15] },
+    { kind = "airframe", pos = [-8.8, 0.6, 3.15] },
+    { kind = "airframe", pos = [-9.3, 4.2, 0.0] },
+    # Prop tips at their lowest, one per engine
+    { kind = "airframe", pos = [2.2, -0.3, -3.0] },
+    { kind = "airframe", pos = [2.2, -0.3, 3.0] },
+]
+
+[derivs]
+c_lift_elevator = 0.42
+c_side_rudder = 0.2
+cm_0 = 0.05
+cm_alpha = -2.0
+cm_q = -18.0
+cm_elevator = -1.4
+cl_beta = -0.1
+cl_aileron = 0.16
+cn_beta = 0.08
+cn_r = -0.14
+cn_rudder = -0.08
+
+[gear]
+sag = 0.1                # soft, made for gravel
+damping = 0.5
+rebound_damping = 2.0
+max_brake_friction = 0.4
+
+[flaps]
+detents = [0.0, 10.0, 20.0, 37.5]
+lift_fraction = [0.0, 0.35, 0.7, 1.0]
+delta_cl = 1.0
+delta_max_cl = 1.0                    # about 58 kt stall at full flaps
+delta_cd = 0.10
+delta_cm = -0.12
+travel_time = 10.0
+
+[[tanks]]
+pos = [1.2, -1.0, 0.0] # forward belly tank
+capacity_kg = 575.0
+
+[[tanks]]
+pos = [-1.2, -1.0, 0.0] # aft belly tank
+capacity_kg = 575.0
+
+[[stations]]
+name = "flight deck"
+pos = [3.2, 0.0, 0.0]
+default_kg = 170.0    # two crew
+
+[[stations]]
+name = "nose baggage"
+pos = [5.3, 0.0, 0.0]
+
+[[stations]]
+name = "cabin front"
+pos = [1.0, 0.0, 0.0]
+
+[[stations]]
+name = "cabin rear"
+pos = [-2.5, 0.0, 0.0]
+
+[[stations]]
+name = "aft baggage"
+pos = [-5.0, 0.0, 0.0]

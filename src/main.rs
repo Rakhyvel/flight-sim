@@ -49,6 +49,7 @@ mod flight_data;
 mod heightmap;
 mod hud;
 mod landing;
+mod mass;
 mod minimap;
 mod plane_model;
 mod region;
@@ -77,10 +78,10 @@ const BRIEFING_TIME: f64 = 10.0;
 // - [x] better worldgen model (like 100km, real maps, hawaii, denver)
 //     - [x] mini map that's stylized like a real map
 //     - [ ] zoom in and out with [ and ]
-//     - [ ] able to program and override routes and stuff
+//     - [ ] make it more like an FMS, display the route name, range, ETE here, and let the player reprogram it
 //     - [ ] water above sea level, I feel like _i_ can tell where there should be water, it's really flat and in a valley, so hopefully an algorithm can too
 //     - [ ] seamless flight between two regions' tiffs
-//     - [ ] climate, so that AZ is hot/dry, CA/CO is cool/dry, HI is hot/wet
+//     - [ ] climate, so that AZ looks hot/dry, CA/CO look cool/dry, HI looks hot/wet. could probably just interpolate fixed city climate averages
 // - [ ] weather, wind, time of day
 //     - [x] distance haze, fog
 //     - [ ] Higher LOD shadow maps for the airplane, maybe cascading shadow maps
@@ -100,21 +101,23 @@ const BRIEFING_TIME: f64 = 10.0;
 //     - [x] load airports and runways from ourairports csvs
 //     - [ ] display the runways based on their surface type
 // - [x] flaps, gear, slats, aerobrakes, whatever
+//     - [ ] local time on hud
 //     - [ ] stall horn for the cessna
 //     - [ ] g limits
 // - [ ] different planes (172, pa-28, cub, otter, citation, 737-200)
 //      - [x] load these from tomls
 //      - [ ] actual .obj meshes and textures
 //      - [ ] do actual engine/prop models, move rpm calc from front-end to engine backend
-// - [ ] fuel, wet mass, cargo mass
+// - [x] fuel, wet mass, cargo mass
 // - [x] waypoints, IFR, ATC call outs? flight plans?
 // - [ ] missions/scenarios
-//     - [ ] load from toml, title, have desc, region, ToD, plane load out, waypoints, and landing objectives
+//     - [x] load from toml, title, have desc, region, ToD, plane load out, waypoints, and landing objectives
 //     - [ ] main menu that lists scenarios, using UI (move delta-horizon's UI to apricot?)
 //     - [ ] custom/free-flight mission editor
 //     - [ ] scenario shuffle
 // - [ ] cockpit camera? idrc about this ngl
 // - [ ] ATIS readouts, maybe in a synthesized/phonetic voice? that'd be cool
+// - [ ] flight recorder for analysis
 
 fn main() -> Result<(), Error> {
     run(
@@ -283,6 +286,9 @@ impl FlightSim {
             .set_direction(self.scenario.sun_direction());
         renderer.set_light(Some(&self.light));
         self.plane = Airplane::new(self.scenario.plane_config());
+        self.plane
+            .load(self.scenario.fuel_fraction, &self.scenario.station_loads)
+            .unwrap_or_else(|e| panic!("{}: {e}", self.scenario_path));
         self.engine_rpm = 700.0;
 
         // Place the plane
@@ -388,14 +394,18 @@ impl Scene for FlightSim {
 
         // For fixed speed props
         // TODO: Configurable?!
-        let target_rpm =
-            (700.0 + self.controls.throttle as f64 * 1600.0 + self.plane.vel.norm() * 6.0)
-                .min(2800.0);
+        let running = self.plane.engine_running();
+        let power_rpm = if running {
+            700.0 + self.controls.throttle as f64 * 1600.0
+        } else {
+            0.0
+        };
+        let target_rpm = (power_rpm + self.plane.vel.norm() * 6.0).min(2800.0);
         self.engine_rpm += (target_rpm - self.engine_rpm) * (1.5 * dt).min(1.0);
 
         let (rpm, throttle, airspeed) = (
             self.engine_rpm,
-            self.controls.throttle,
+            if running { self.controls.throttle } else { 0.0 },
             self.plane.vel.norm(),
         );
         if let Some(sound) = &mut self.engine_sound {

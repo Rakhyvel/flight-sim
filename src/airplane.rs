@@ -1,11 +1,12 @@
-use std::f64::consts::FRAC_PI_2;
+use std::{collections::HashMap, f64::consts::FRAC_PI_2};
 
 use apricot::camera::floating_origin::FloatingOrigin;
-use nalgebra_glm::{vec3, DMat3, DQuat, DVec3, Mat4, Vec3};
+use nalgebra_glm::{vec3, DQuat, DVec3, Mat4, Vec3};
 
 use crate::{
     config::{AirplaneConfig, ContactKind, FlapConfig},
     control::Controls,
+    mass::PlaneMassProperties,
 };
 
 /// How much stiffer the airframe is than the tires (?)
@@ -26,6 +27,8 @@ const BALL_DAMPING: f64 = 4.0;
 /// How much of the pitch stability is left past the stall, once the tail is in the wing's wake.
 /// Lower makes spins easier to hold
 const POST_STALL_PITCH_STABILITY: f64 = 0.3;
+/// Anything under this throttle has a constant fuel burn rate
+const IDLE_THROTTLE: f64 = 0.07;
 
 pub struct Airplane {
     // State
@@ -46,8 +49,10 @@ pub struct Airplane {
     slip_ball: f64,
 
     config: AirplaneConfig,
-    inertia: DMat3,
-    inertia_inv: DMat3,
+    fuel_tank_masses: Vec<f64>,    // [kg]
+    station_load_masses: Vec<f64>, // [kg]
+    mass_properties: PlaneMassProperties,
+    fuel_flow: f64, // [kg/s]
     control_limits: DVec3,
 
     /// What touched the ground during the last update
@@ -108,9 +113,11 @@ const MAX_PHYSICS_STEP: f64 = 1.0 / 240.0;
 
 impl Airplane {
     pub fn new(config: AirplaneConfig) -> Self {
-        let inertia = config.inertia.matrix();
-        let inertia_inv = nalgebra_glm::inverse(&inertia);
         let control_limits = config.control_limits.radians();
+        let fuel_tank_masses: Vec<f64> = config.tanks.iter().map(|t| t.capacity_kg).collect();
+        let station_load_masses: Vec<f64> = config.stations.iter().map(|s| s.default_kg).collect();
+        let mass_properties =
+            PlaneMassProperties::new(&config, &fuel_tank_masses, &station_load_masses);
 
         Self {
             pos: vec3(0.0, 40.0, 0.0),
@@ -121,11 +128,47 @@ impl Airplane {
             flaps: 0.0,
             slip_ball: 0.0,
             config,
-            inertia,
-            inertia_inv,
+            fuel_tank_masses,
+            station_load_masses,
+            mass_properties,
+            fuel_flow: 0.0,
             control_limits,
             contact: GroundContact::default(),
         }
+    }
+
+    /// Distributes `fuel_fraction` to the plane's tanks, and sets the `station_loads` weights. Overwrites any old values
+    pub fn load(
+        &mut self,
+        fuel_fraction: f64,
+        station_loads: &HashMap<String, f64>,
+    ) -> Result<(), String> {
+        for (name, &kg) in station_loads {
+            let i = self
+                .config
+                .stations
+                .iter()
+                .position(|s| &s.name == name) // already checked for uniqueness when loaded
+                .ok_or_else(|| format!("{} has no station {name}", self.config.name))?;
+            self.station_load_masses[i] = kg;
+        }
+
+        // Evenly distribute the fuel across all the tanks
+        let fuel_fraction = fuel_fraction.clamp(0.0, 1.0);
+        self.fuel_tank_masses = self
+            .config
+            .tanks
+            .iter()
+            .map(|t| t.capacity_kg * fuel_fraction)
+            .collect();
+
+        self.mass_properties = PlaneMassProperties::new(
+            &self.config,
+            &self.fuel_tank_masses,
+            &self.station_load_masses,
+        );
+
+        Ok(())
     }
 
     /// Put the plane at `pos` facing `heading`
@@ -161,9 +204,10 @@ impl Airplane {
         let defl = Deflections::from_controls(controls, self.control_limits);
 
         self.move_flaps(dt);
+        self.burn(controls.throttle as f64, aero.air_density, dt);
 
         // TODO: engine torque and P-factor
-        let gravity = DVec3::new(0.0, -9.81, 0.0) * self.config.mass;
+        let gravity = DVec3::new(0.0, -9.81, 0.0) * self.mass_properties.kg;
         let forces = self.calc_aero_forces(controls.throttle as f64, &aero, &defl);
         let torque = self.calc_aero_moments(&aero, &defl);
         let (wing_force, wing_torque) = self.calc_wing_forces(&aero, &defl);
@@ -175,7 +219,10 @@ impl Airplane {
 
         self.update_slip_ball(total, dt);
         self.integrate_translation(total + gravity, dt);
-        self.integrate_rotation(torque + wing_torque + ground_torque, dt);
+        self.integrate_rotation(
+            torque + wing_torque + ground_torque + self.cg_torque(total),
+            dt,
+        );
     }
 
     /// Run the flap motor to the target setting
@@ -189,6 +236,47 @@ impl Airplane {
         let target = if full > 0.0 { lever / full } else { 0.0 };
         let max_move = dt / f.travel_time;
         self.flaps += (target - self.flaps).clamp(-max_move, max_move);
+    }
+
+    fn burn(&mut self, throttle: f64, density: f64, dt: f64) {
+        let total_fuel_kg: f64 = self.fuel_tank_masses.iter().sum();
+        let power = self.engine_power(throttle.max(IDLE_THROTTLE), density);
+        self.fuel_flow = power / 1000.0 * self.config.fuel_kg_per_kwh / 3600.0;
+        if total_fuel_kg <= 0.0 {
+            return;
+        }
+
+        // subtract out the fuel used for this frame and update our mass properties
+        let used = (self.fuel_flow * dt).min(total_fuel_kg);
+        if used >= total_fuel_kg {
+            self.fuel_tank_masses.fill(0.0); // no more fuel!
+        } else {
+            for kg in &mut self.fuel_tank_masses {
+                *kg -= used * *kg / total_fuel_kg;
+            }
+        }
+        self.mass_properties = PlaneMassProperties::new(
+            &self.config,
+            &self.fuel_tank_masses,
+            &self.station_load_masses,
+        );
+    }
+
+    /// The power the engine makes at `throttle` in air of `density` [W]
+    fn engine_power(&self, throttle: f64, density: f64) -> f64 {
+        if !self.engine_running() {
+            return 0.0;
+        }
+        throttle * self.config.max_power * density / 1.225
+    }
+
+    /// The torque [body space] that a `force` [world space] applies about the CoG
+    fn cg_torque(&self, force: DVec3) -> DVec3 {
+        let inv_orientation = nalgebra_glm::quat_inverse(&self.orientation);
+        -self
+            .mass_properties
+            .cg
+            .cross(&nalgebra_glm::quat_rotate_vec3(&inv_orientation, &force))
     }
 
     /// One of the flap effects, scaled by how far down the flaps are. 0 for planes without flaps
@@ -231,7 +319,7 @@ impl Airplane {
 
         // Thrust
         let forward = nalgebra_glm::quat_rotate_vec3(&self.orientation, &DVec3::new(1.0, 0.0, 0.0));
-        let power = throttle * self.config.max_power * aero.air_density / 1.225;
+        let power = self.engine_power(throttle, aero.air_density);
         let thrust = (throttle * self.config.max_thrust)
             .min(self.config.prop_efficiency * power / aero.speed.max(1.0));
         force += forward * thrust;
@@ -426,7 +514,7 @@ impl Airplane {
         ground: &impl Fn(f64, f64) -> (f32, Vec3),
     ) -> (DVec3, DVec3, GroundContact) {
         let mut touch = GroundContact::default();
-        let weight = self.config.mass * 9.81;
+        let weight = self.mass_properties.kg * 9.81;
 
         // Springs that hold the plane up with wheel sag of squash, with the weight shared between the wheels
         let wheels = self
@@ -436,7 +524,8 @@ impl Airplane {
             .filter(|c| matches!(c.kind, ContactKind::Wheel { .. }))
             .count() as f64;
         let k_wheel = weight / (wheels * self.config.gear.sag);
-        let c_wheel = self.config.gear.damping * 2.0 * (k_wheel * self.config.mass / wheels).sqrt();
+        let c_wheel =
+            self.config.gear.damping * 2.0 * (k_wheel * self.mass_properties.kg / wheels).sqrt();
 
         let omega = nalgebra_glm::quat_rotate_vec3(&self.orientation, &self.body_angular_velocity);
         let forward = nalgebra_glm::quat_rotate_vec3(&self.orientation, &vec3(1.0, 0.0, 0.0));
@@ -533,7 +622,7 @@ impl Airplane {
 
     /// Move the slip ball toward where the felt gravity points
     fn update_slip_ball(&mut self, total_force: DVec3, dt: f64) {
-        let felt = total_force / self.config.mass;
+        let felt = total_force / self.mass_properties.kg;
         let f =
             nalgebra_glm::quat_rotate_vec3(&nalgebra_glm::quat_inverse(&self.orientation), &felt);
         // Felt gravity is opposite the felt force, and the ball rolls that way
@@ -542,14 +631,15 @@ impl Airplane {
     }
 
     fn integrate_translation(&mut self, forces: DVec3, dt: f64) {
-        let accel = forces / self.config.mass;
+        let accel = forces / self.mass_properties.kg;
         self.vel += accel * dt;
         self.pos += self.vel * dt;
     }
 
     fn integrate_rotation(&mut self, torque: DVec3, dt: f64) {
-        let h = self.inertia * self.body_angular_velocity;
-        let angular_accel = self.inertia_inv * (torque - self.body_angular_velocity.cross(&h)); // hey this looks like orbit stuff!
+        let h = self.mass_properties.inertia * self.body_angular_velocity;
+        let angular_accel =
+            self.mass_properties.inertia_inv * (torque - self.body_angular_velocity.cross(&h)); // hey this looks like orbit stuff!
         self.body_angular_velocity += angular_accel * dt;
 
         let angular_speed = self.body_angular_velocity.norm();
@@ -621,6 +711,21 @@ impl Airplane {
     /// What touched the ground during the last `update`, and how hard
     pub fn contact(&self) -> GroundContact {
         self.contact
+    }
+
+    /// Then you better go catch it!
+    pub fn engine_running(&self) -> bool {
+        self.fuel() > 0.0
+    }
+
+    /// How much fuel is left [kg]
+    pub fn fuel(&self) -> f64 {
+        self.fuel_tank_masses.iter().sum()
+    }
+
+    /// How fast fuel is being burned [kg/s]
+    pub fn fuel_flow(&self) -> f64 {
+        self.fuel_flow
     }
 }
 
@@ -838,5 +943,43 @@ mod tests {
         let (detents, table) = (&f.detents, f.lift_fraction.as_ref().unwrap());
         p.flaps = detents[2] / detents.last().unwrap();
         assert!((p.flap_lift_fraction() - table[2]).abs() < 1e-9);
+    }
+
+    #[test]
+    fn burning_fuel_lightens_the_plane() {
+        let mut p = plane_at(vec3(55.0, 0.0, 0.0));
+        let full = p.mass_properties.kg;
+        p.burn(1.0, 1.225, 60.0);
+        assert!(p.mass_properties.kg < full);
+    }
+
+    #[test]
+    fn dry_tanks_make_no_thrust() {
+        let mut p = plane_at(vec3(55.0, 0.0, 0.0));
+        p.load(0.0, &HashMap::new()).unwrap();
+        let mut c = Controls::new();
+        c.throttle = 1.0;
+        let aero = p.calc_aero_state();
+        let defl = Deflections::from_controls(&c, p.control_limits);
+        let dry = p.calc_aero_forces(1.0, &aero, &defl);
+        let idle = p.calc_aero_forces(0.0, &aero, &defl);
+        assert!((dry - idle).norm() < 1e-9, "full throttle does nothing");
+    }
+
+    #[test]
+    fn aft_cg_pitches_the_nose_up() {
+        let mut p = plane_at(vec3(55.0, 0.0, 0.0));
+        p.mass_properties.cg = vec3(-0.1, 0.0, 0.0);
+        assert!(
+            p.cg_torque(vec3(0.0, 10_000.0, 0.0)).z > 0.0,
+            "lift ahead of the CG"
+        );
+    }
+
+    #[test]
+    fn unknown_station_is_an_error() {
+        let mut p = plane_at(vec3(55.0, 0.0, 0.0));
+        let loads = HashMap::from([("hot tub".to_string(), 500.0)]);
+        assert!(p.load(1.0, &loads).is_err());
     }
 }

@@ -1,5 +1,8 @@
 name = "Piper J-3 Cub"
-mass = 550.0
+empty_mass = 340.0
+empty_cg = [0.037, 0.0, 0.0]
+fuel_kg_per_kwh = 0.30                                        # about 4 gph, an old A-65
+empty_inertia = { roll = 650.0, yaw = 1250.0, pitch = 900.0 }
 wing_area = 16.5
 wingspan = 10.74
 mean_chord = 1.54
@@ -15,7 +18,6 @@ max_thrust = 1700.0
 max_power = 48500.0   # 65 hp
 prop_efficiency = 0.8
 
-inertia = { roll = 650.0, yaw = 1300.0, pitch = 950.0 }
 control_limits = { elevator = 25.0, aileron = 15.0, rudder = 25.0 }
 
 contacts = [
@@ -55,3 +57,21 @@ rebound_damping = 2.0
 max_brake_friction = 0.3
 
 # no flaps!
+
+[[tanks]]
+# ahead of the front seat, so the CG walks aft as it burns
+pos = [0.95, 0.0, 0.0]
+capacity_kg = 33.0     # 12 gal
+
+[[stations]]
+name = "front seat"
+pos = [0.15, 0.0, 0.0]
+
+[[stations]]
+name = "rear seat"
+pos = [-0.55, 0.0, 0.0]
+default_kg = 80.0       # solo from the back
+
+[[stations]]
+name = "baggage"
+pos = [-1.0, 0.0, 0.0]

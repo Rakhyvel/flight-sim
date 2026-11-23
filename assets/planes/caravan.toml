@@ -1,21 +1,23 @@
 name = "Cessna 208B Grand Caravan"
-mass = 3700.0                      # about 8,150 lb, a full tour load
-wing_area = 25.96                  # 279 sq ft
-wingspan = 15.88                   # 52 ft 1 in
+empty_mass = 2150.0                                               # about 4,740 lb
+empty_cg = [-0.079, 0.0, 0.0]
+fuel_kg_per_kwh = 0.45                                            # about 370 lb/h at cruise
+empty_inertia = { roll = 4860.0, yaw = 15510.0, pitch = 13900.0 }
+wing_area = 25.96                                                 # 279 sq ft
+wingspan = 15.88                                                  # 52 ft 1 in
 mean_chord = 1.63
-lift_slope = 5.1                   # aspect ratio 9.7
-zero_lift_coefficient = 0.25       # thick, cambered wing
-max_cl = 1.5                       # about 78 kt stall clean at max weight
+lift_slope = 5.1                                                  # aspect ratio 9.7
+zero_lift_coefficient = 0.25                                      # thick, cambered wing
+max_cl = 1.5                                                      # about 78 kt stall clean at max weight
 min_cl = -0.8
-drag_coefficient_base = 0.028      # fixed gear and a strut, cruises about 170 kt at 10,000 ft here
+drag_coefficient_base = 0.028                                     # fixed gear and a strut, cruises about 170 kt at 10,000 ft here
 oswald_efficiency = 0.75
-cy_beta = -0.45                    # lots of slab-sided fuselage
+cy_beta = -0.45                                                   # lots of slab-sided fuselage
 
 max_thrust = 8500.0
 max_power = 503000.0   # 675 shp PT6A-114A
 prop_efficiency = 0.75
 
-inertia = { roll = 8900.0, yaw = 19900.0, pitch = 14250.0 }
 control_limits = { elevator = 22.0, aileron = 18.0, rudder = 22.0 }
 
 contacts = [
@@ -103,3 +105,28 @@ delta_max_cl = 0.95                   # about 61 kt stall at full flaps
 delta_cd = 0.07
 delta_cm = -0.1
 travel_time = 12.0
+
+[[tanks]]
+pos = [0.0, 0.0, -2.0]
+capacity_kg = 505.0    # 167 gal of Jet A per wing
+
+[[tanks]]
+pos = [0.0, 0.0, 2.0]
+capacity_kg = 505.0
+
+[[stations]]
+name = "flight deck"
+pos = [2.0, 0.0, 0.0]
+default_kg = 85.0
+
+[[stations]]
+name = "cabin front"
+pos = [0.0, 0.0, 0.0]
+
+[[stations]]
+name = "cabin rear"
+pos = [-2.2, 0.0, 0.0]
+
+[[stations]]
+name = "cargo pod"
+pos = [-0.3, 0.0, 0.0] # up to about 490 kg

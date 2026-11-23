@@ -1,5 +1,8 @@
 name = "Cessna 172 Skyhawk"
-mass = 1111.0                 # about 2,450 lb, near max gross
+empty_mass = 762.0                                             # about 1,680 lb
+empty_cg = [0.024, 0.0, 0.0]
+fuel_kg_per_kwh = 0.25                                         # about 8 gph at 75% power
+empty_inertia = { roll = 920.0, yaw = 2290.0, pitch = 1820.0 }
 wing_area = 16.2
 wingspan = 11.0
 mean_chord = 1.49
@@ -15,7 +18,6 @@ max_thrust = 2600.0
 max_power = 119000.0  # 160 hp
 prop_efficiency = 0.8
 
-inertia = { roll = 1285.0, yaw = 2667.0, pitch = 1825.0 }
 control_limits = { elevator = 25.0, aileron = 18.0, rudder = 16.0 }
 
 contacts = [
@@ -103,3 +105,24 @@ delta_max_cl = 0.7
 delta_cd = 0.06
 delta_cm = -0.05
 travel_time = 8.0
+
+[[tanks]]
+pos = [-0.18, 0.0, -1.6]
+capacity_kg = 72.0       # 26.5 gal usable
+
+[[tanks]]
+pos = [-0.18, 0.0, 1.6]
+capacity_kg = 72.0
+
+[[stations]]
+name = "front seats"
+pos = [0.10, 0.0, 0.0]
+default_kg = 80.0      # the pilot
+
+[[stations]]
+name = "rear seats"
+pos = [-0.81, 0.0, 0.0]
+
+[[stations]]
+name = "baggage"
+pos = [-1.37, 0.0, 0.0]

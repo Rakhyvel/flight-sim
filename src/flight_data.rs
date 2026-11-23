@@ -34,6 +34,9 @@ pub struct FlightData {
     pub slip: f32,
     /// [rad/s], + = turning right
     pub turn_rate: f32,
+
+    pub fuel: f32,      // [kg]
+    pub fuel_flow: f32, // [kg/s]
 }
 
 pub struct NavData {
@@ -81,6 +84,8 @@ impl FlightData {
             nav: NavData::gather(plane, ground_speed, route),
             slip: plane.slip() as f32,
             turn_rate: plane.turn_rate() as f32,
+            fuel: plane.fuel() as f32,
+            fuel_flow: plane.fuel_flow() as f32,
         }
     }
 }

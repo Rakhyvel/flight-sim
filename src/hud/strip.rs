@@ -4,7 +4,10 @@ use nalgebra_glm::{vec2, Vec4};
 use super::{
     widgets::thousands, ACCENT, DIM, FT_PER_M, KT_PER_MS, M_PER_NM, OUTLINE, STRIP, TEXT, WAYPOINT,
 };
-use crate::{flight_data::FlightData, hud::Theme};
+use crate::{
+    flight_data::FlightData,
+    hud::{Theme, BAD},
+};
 
 struct Cell {
     label: &'static str,
@@ -106,6 +109,7 @@ fn cells(data: &FlightData) -> Vec<Cell> {
             2,
         ));
     }
+    cells.push(fuel(data));
     cells.extend([
         cell("THR", format!("{:.0}%", data.throttle * 100.0), TEXT, 4),
         cell(
@@ -141,4 +145,23 @@ fn radar_altitude(m: f32) -> String {
 fn minutes_seconds(s: f32) -> String {
     let s = s as u32;
     format!("{}:{:02}", s / 60, s % 60)
+}
+
+fn hours_minutes(s: f32) -> String {
+    let minutes = s as u32 / 60;
+    format!("{}h{}", minutes / 60, minutes % 60)
+}
+
+fn fuel(data: &FlightData) -> Cell {
+    const LOW: f32 = 30.0 * 60.0; // [s]
+    if data.fuel <= 0.0 {
+        return cell("FUEL", "OUT".into(), BAD, 4);
+    }
+    let left = data.fuel / data.fuel_flow.max(1e-6);
+    cell(
+        "FUEL",
+        hours_minutes(left),
+        if left < LOW { ACCENT } else { TEXT },
+        4,
+    )
 }

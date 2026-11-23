@@ -1,5 +1,8 @@
 name = "Dash 8 Q400"
-mass = 25000.0
+empty_mass = 17100.0
+empty_cg = [0.28, 0.0, 0.0]
+fuel_kg_per_kwh = 0.28                                               # about 1,600 kg/h at cruise
+empty_inertia = { roll = 90000.0, yaw = 330000.0, pitch = 280000.0 }
 wing_area = 63.1
 wingspan = 28.4
 mean_chord = 2.3
@@ -15,7 +18,6 @@ max_thrust = 52000.0
 max_power = 7560000.0
 prop_efficiency = 0.85
 
-inertia = { roll = 45000.0, yaw = 150000.0, pitch = 120000.0 }
 control_limits = { elevator = 20.0, aileron = 15.0, rudder = 22.0 }
 
 contacts = [
@@ -78,3 +80,31 @@ delta_max_cl = 1.0
 delta_cd = 0.08
 delta_cm = -0.15
 travel_time = 15.0
+
+[[tanks]]
+pos = [-0.5, 0.0, -4.0]
+capacity_kg = 2660.0
+
+[[tanks]]
+pos = [-0.5, 0.0, 4.0]
+capacity_kg = 2660.0
+
+[[stations]]
+name = "flight deck"
+pos = [12.5, 0.0, 0.0]
+default_kg = 180.0
+
+[[stations]]
+name = "cabin front"
+pos = [5.0, 0.0, 0.0]
+default_kg = 3000.0
+
+[[stations]]
+name = "cabin rear"
+pos = [-5.0, 0.0, 0.0]
+default_kg = 3000.0
+
+[[stations]]
+name = "aft baggage"
+pos = [-11.0, 0.0, 0.0]
+default_kg = 400.0

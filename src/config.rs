@@ -1,23 +1,29 @@
+use std::collections::HashSet;
+
 use nalgebra_glm::{vec3, DMat3, DVec3};
 use serde::Deserialize;
 
 #[derive(Clone, Deserialize)]
 pub struct AirplaneConfig {
     pub name: String,
-    /// Mass of the airplane [kg]
-    pub mass: f64,
+    /// Mass of the plane when empty [kg]
+    pub empty_mass: f64,
+    /// Center of gravity of the plane when empty [m, body space]
+    #[serde(default)]
+    pub empty_cg: [f64; 3],
     /// Area of the wings [m^2]
     pub wing_area: f64,
     /// Wingspan [m]
     pub wingspan: f64,
     /// Chord thats a bit rude [m]
     pub mean_chord: f64,
-    /// Rotational inertia tensor
-    pub inertia: Inertia,
+    /// Rotational inertia tensor about the center of gravity of the plane when empty
+    pub empty_inertia: Inertia,
 
     /// Max thrust of the engine [N]
     pub max_thrust: f64,
     pub max_power: f64,
+    pub fuel_kg_per_kwh: f64,
     pub prop_efficiency: f64,
 
     /// Lift coefficient slope [1/rad]
@@ -41,6 +47,11 @@ pub struct AirplaneConfig {
     pub gear: GearConfig,
     pub contacts: Vec<ContactPoint>,
     pub flaps: Option<FlapConfig>,
+
+    #[serde(default)]
+    pub tanks: Vec<FuelTank>,
+    #[serde(default)]
+    pub stations: Vec<Station>,
 }
 
 /// Rotational inertia about each axis [kg*m^2]
@@ -153,9 +164,30 @@ fn default_contact_radius() -> f64 {
     0.1
 }
 
+#[derive(Clone, Copy, Deserialize)]
+pub struct FuelTank {
+    /// Where the fuel sits [m, body space]
+    pub pos: [f64; 3],
+    /// How much fuel it holds when full [kg]
+    pub capacity_kg: f64,
+}
+
+/// Extra dry mass, like cargo or people
+#[derive(Clone, Deserialize)]
+pub struct Station {
+    pub name: String,
+    /// Where this station is [m, body space]
+    pub pos: [f64; 3],
+    /// Potentially overwritten
+    #[serde(default)]
+    pub default_kg: f64,
+}
+
 impl AirplaneConfig {
     pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let config: Self = toml::from_str(&std::fs::read_to_string(path)?)?;
+
+        // Check that the detents and lift_fraction arrays are matching lengths
         if let Some(f) = &config.flaps {
             if f.lift_fraction
                 .as_ref()
@@ -166,6 +198,13 @@ impl AirplaneConfig {
                 );
             }
         }
+
+        // Check that station names are unique
+        let mut seen = HashSet::new();
+        if let Some(repeat) = config.stations.iter().find(|s| !seen.insert(&s.name)) {
+            return Err(format!("{path}: more than one station named '{}'", repeat.name).into());
+        }
+
         Ok(config)
     }
 

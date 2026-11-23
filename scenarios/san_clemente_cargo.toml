@@ -1,0 +1,26 @@
+title = "San Clemente cargo run"
+description = """
+Supplies for the Navy island, 70 nm out.
+Off Lindbergh past Point Loma, then open ocean
+all the way to San Clemente runway 24."""
+region = "SoCal"
+plane = "twin_otter"
+time_of_day = 7.0 # first run of the day
+fuel_fraction = 0.4 # about 1h40 of fuel for a 25 minute leg
+land = "KNUC 24"
+
+[start]
+kind = "runway"
+runway = "KSAN 27"
+
+[station_loads]
+"nose baggage" = 100
+"cabin front" = 600
+"cabin rear" = 400
+"aft baggage" = 100
+
+[[sight]]
+name = "Point Loma Lighthouse"
+lat = 32.6722
+lon = -117.2410
+altitude_ft = 2000
