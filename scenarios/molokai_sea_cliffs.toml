@@ -1,0 +1,43 @@
+title = "Molokai sea cliffs"
+description = """
+Around the north tip of West Maui, across the channel,
+then along the tallest sea cliffs in the world. Stay offshore.
+Land on Kalaupapa runway 23: 2,700 ft long, 75 ft wide."""
+region = "Maui"
+plane = "j3cub"
+time_of_day = 10.0
+land = "PHLU 23"
+
+[start]
+kind = "runway"
+runway = "PHOG 02"
+
+[[sight]]
+name = "Kahakuloa Head"
+lat = 21.0128
+lon = -156.5495
+altitude_ft = 2000
+
+[[sight]]
+name = "Nakalele Blowhole"
+lat = 21.0263
+lon = -156.5895
+altitude_ft = 2000
+
+[[sight]]
+name = "Honolua Bay"
+lat = 21.0144
+lon = -156.6386
+altitude_ft = 1500
+
+[[sight]]
+name = "Halawa Valley"
+lat = 21.159
+lon = -156.738
+altitude_ft = 2000
+
+[[sight]]
+name = "Wailau Valley"
+lat = 21.151
+lon = -156.826
+altitude_ft = 2000

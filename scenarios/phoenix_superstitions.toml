@@ -1,0 +1,32 @@
+# Dedicated to Yeshua Loya. Rest in peace, man.
+title = "Valley of the Sun"
+description = """
+Depart Scottsdale runway 21 past Camelback,
+then out east to the Superstition Mountains.
+Land on Falcon Field runway 22L."""
+region = "Tucson"
+plane = "cessna172"
+time_of_day = 17.0 # low sun on the Superstitions' west face
+land = "KFFZ 22L"
+
+[start]
+kind = "runway"
+runway = "KSDL 21"
+
+[[sight]]
+name = "Camelback Mountain"
+lat = 33.5151
+lon = -111.9619
+altitude_ft = 3500
+
+[[sight]]
+name = "Hole in the Rock"
+lat = 33.4544
+lon = -111.9445
+altitude_ft = 2500
+
+[[sight]]
+name = "Weavers Needle"
+lat = 33.4289
+lon = -111.3711
+altitude_ft = 6000

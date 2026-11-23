@@ -1,0 +1,49 @@
+title = "Seattle city tour"
+description = """
+Depart Renton northbound over Lake Washington.
+Take in the sights at 1,500 ft,
+then land on Boeing Field runway 14R."""
+region = "Seattle"
+plane = "cessna172"
+time_of_day = 16.5
+land = "KBFI 14R"
+
+[start]
+kind = "runway"
+runway = "KRNT 34"
+
+[[sight]]
+name = "520 Bridge"
+lat = 47.641
+lon = -122.259
+altitude_ft = 1500
+
+[[sight]]
+name = "Husky Stadium"
+lat = 47.6503
+lon = -122.3016
+altitude_ft = 1500
+
+[[sight]]
+name = "Gas Works Park"
+lat = 47.6456
+lon = -122.3344
+altitude_ft = 1500
+
+[[sight]]
+name = "Space Needle"
+lat = 47.6205
+lon = -122.3493
+altitude_ft = 1500
+
+[[sight]]
+name = "Pike Place Market"
+lat = 47.6097
+lon = -122.3422
+altitude_ft = 1500
+
+[[sight]]
+name = "Lumen Field"
+lat = 47.5952
+lon = -122.3316
+altitude_ft = 1200

@@ -1,0 +1,37 @@
+title = "Volcanoes of the Big Island"
+description = """
+Depart Hilo west, then south to Kilauea's caldera.
+Down the rift past the sea arch and around Cape Kumukahi.
+Straight in over the bay to Hilo runway 26."""
+region = "Maui"
+plane = "cessna172"
+time_of_day = 15.0
+land = "PHTO 26"
+
+[start]
+kind = "runway"
+runway = "PHTO 26"
+
+[[sight]]
+name = "Kilauea Caldera"
+lat = 19.4069
+lon = -155.2834
+altitude_ft = 6000
+
+[[sight]]
+name = "Puu Oo"
+lat = 19.3866
+lon = -155.1050
+altitude_ft = 5000
+
+[[sight]]
+name = "Holei Sea Arch"
+lat = 19.2930
+lon = -155.1120
+altitude_ft = 2000
+
+[[sight]]
+name = "Cape Kumukahi"
+lat = 19.5163
+lon = -154.8106
+altitude_ft = 2500

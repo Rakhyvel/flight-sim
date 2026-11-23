@@ -22,9 +22,18 @@ const CRASH_IMPACT: f64 = 2.0;
 const FT_PER_M: f64 = 3.28084;
 const AGAIN: &str = "R to fly again";
 
+// TODO: Common between landing and tour (and likely other objectives), doesn't belong here
+/// One line of a debrief
+pub struct DebriefRow {
+    pub label: String,
+    pub value: String,
+    pub grade: Grade,
+}
+
+// TODO: Common between landing and tour (and likely other objectives), doesn't belong here
 /// How well one part of a landing went, best first
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
-enum Grade {
+pub enum Grade {
     Butter,
     Good,
     Poor,
@@ -32,7 +41,7 @@ enum Grade {
 }
 
 impl Grade {
-    fn by(value: f64, butter: f64, good: f64, poor: f64) -> Self {
+    pub fn by(value: f64, butter: f64, good: f64, poor: f64) -> Self {
         if value <= butter {
             Grade::Butter
         } else if value <= good {
@@ -164,8 +173,9 @@ impl Landing {
         }
     }
 
-    /// How it went, once the plane has stopped or crashed
-    pub fn debrief(&self) -> Option<Notice> {
+    // TODO: Common between landing and tour (and likely other objectives), doesn't belong here
+    /// How it went, once the plane has stopped or crashed, with `before` listed ahead of the landing
+    pub fn debrief(&self, before: &[DebriefRow]) -> Option<Notice> {
         let (td, stopped_on_runway) = match self.phase {
             Phase::Landed(td, on_runway) => (td, on_runway),
             Phase::Crashed(why) => {
@@ -255,6 +265,13 @@ impl Landing {
             ),
         ];
 
+        // Rows from before the landing go first
+        let rows: Vec<(&str, String, Grade)> = before
+            .iter()
+            .map(|row| (row.label.as_str(), row.value.clone(), row.grade))
+            .chain(rows)
+            .collect();
+
         // The worst part sets the headline
         let worst = rows
             .iter()
@@ -265,11 +282,13 @@ impl Landing {
             Grade::Butter => "Butter!",
             Grade::Good => "Nice landing",
             Grade::Poor => "Could be worse",
-            Grade::Fail => "Any landing you can walk away from...",
+            Grade::Fail => "Any landing you can walk away from...", // TODO: Change to something else if its Fail because of missed sights
         };
+
+        let width = rows.iter().map(|r| r.0.len()).max().unwrap_or(0) + 2;
         let mut lines: Vec<(String, Mood)> = rows
             .into_iter()
-            .map(|(label, value, grade)| (format!("{label:<12}{value}"), grade.mood())) // the HUD font is monospaced, so this lines up
+            .map(|(label, value, grade)| (format!("{label:<width$}{value}"), grade.mood())) // the HUD font is monospaced, so this lines up
             .collect();
         lines.push((AGAIN.to_string(), Mood::Plain));
         Some(Notice {

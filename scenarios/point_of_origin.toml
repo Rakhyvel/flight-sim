@@ -1,0 +1,13 @@
+title = "Point of Origin"
+description = """
+Out of Front Range Airport, south over the plains toward Colorado Springs.
+Keep the foothills off the right wing and the high country in sight.
+Deliver the deep-space radar telemetry equipment to Colorado Springs runway 17L."""
+region = "Denver"
+plane = "dash8"
+time_of_day = 6.5
+land = "KCOS 17L"
+
+[start]
+kind = "runway"
+runway = "KFTG 08"

@@ -1,0 +1,37 @@
+title = "Front Range tour"
+description = """
+Depart Rocky Mountain Metro and climb to 9,000 ft
+before the foothills. Flatirons, Red Rocks, downtown,
+then land on Centennial runway 17L."""
+region = "Denver"
+plane = "cessna172"
+time_of_day = 9.0 # morning sun on the east-facing rock
+land = "KAPA 17L"
+
+[start]
+kind = "runway"
+runway = "KBJC 30R"
+
+[[sight]]
+name = "Flatirons"
+lat = 39.9877
+lon = -105.2925
+altitude_ft = 9000
+
+[[sight]]
+name = "Red Rocks"
+lat = 39.6655
+lon = -105.2057
+altitude_ft = 9000
+
+[[sight]]
+name = "Empower Field"
+lat = 39.7439
+lon = -105.0201
+altitude_ft = 7500
+
+[[sight]]
+name = "State Capitol"
+lat = 39.7393
+lon = -104.9848
+altitude_ft = 7500

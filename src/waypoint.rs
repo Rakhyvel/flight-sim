@@ -10,6 +10,7 @@ pub enum WaypointKind {
     Airport,
     Navaid,
     Fix,
+    Landmark,
 }
 
 #[derive(Clone)]

@@ -413,6 +413,7 @@ impl World {
             .collect()
     }
 
+    // TODO: Make sure approaches stay 2000' above any terrain
     /// Generate a straight-in approach to a runway
     pub fn approach(&self, runway: &Runway) -> Vec<Waypoint> {
         const M_PER_NM: f64 = 1852.0;

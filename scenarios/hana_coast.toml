@@ -1,0 +1,31 @@
+title = "The road to Hana"
+description = """
+Follow the north shore of Haleakala past Hookipa and Keanae.
+Stay over the water, the slopes rise fast inland.
+Circle out to sea and land on Hana runway 26."""
+region = "Maui"
+plane = "cessna172"
+time_of_day = 9.0
+land = "PHHN 26"
+
+[start]
+kind = "runway"
+runway = "PHOG 05"
+
+[[sight]]
+name = "Hookipa"
+lat = 20.9363
+lon = -156.3570
+altitude_ft = 3000
+
+[[sight]]
+name = "Keanae Peninsula"
+lat = 20.8608
+lon = -156.1475
+altitude_ft = 3000
+
+[[sight]]
+name = "Waianapanapa"
+lat = 20.788
+lon = -156.003
+altitude_ft = 1500

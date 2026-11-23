@@ -21,6 +21,9 @@ pub struct Scenario {
     pub start: Start,
     /// Name of the runway to land on
     pub land: String,
+    /// Landmarks to fly past in order
+    #[serde(default, rename = "sight")]
+    pub sights: Vec<Sight>,
 }
 
 /// Where the plane is when the scenario begins
@@ -38,6 +41,22 @@ pub enum Start {
         speed_kt: f64,
     },
     // TODO: Be able to start mid-air at some (lat/lon/alt, vel)
+}
+
+#[derive(Deserialize)]
+pub struct Sight {
+    pub name: String,
+    pub lat: f64,
+    pub lon: f64,
+    /// Passing within this far counts as seeing it [m]
+    #[serde(default = "default_sight_radius")]
+    pub radius_m: f64,
+    /// Altitude to pass at [ft, above sea level]
+    pub altitude_ft: Option<f64>,
+}
+
+fn default_sight_radius() -> f64 {
+    800.0
 }
 
 impl Scenario {

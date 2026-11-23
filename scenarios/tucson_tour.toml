@@ -1,0 +1,57 @@
+title = "Boneyard and Mount Lemmon"
+description = """
+Down to the mission, then thread the gap between Tumamoc and A Mountain.
+Past the university and the boneyard, climb to 10,000 ft for Mount Lemmon.
+Biosphere 2, then back to Tucson runway 12."""
+region = "Tucson"
+plane = "cessna172"
+time_of_day = 16.5
+land = "KTUS 12"
+
+[start]
+kind = "runway"
+runway = "KTUS 12"
+
+[[sight]]
+name = "Mission San Xavier"
+lat = 32.1072
+lon = -111.0081
+altitude_ft = 3500
+
+[[sight]]
+name = "Tumamoc Gap"
+lat = 32.2118
+lon = -110.9968
+radius_m = 250
+altitude_ft = 2800
+max_altitude_ft = 3000
+
+[[sight]]
+name = "University of Arizona"
+lat = 32.2319
+lon = -110.9535
+altitude_ft = 3500
+
+[[sight]]
+name = "Boneyard"
+lat = 32.150
+lon = -110.836
+altitude_ft = 4500
+
+[[sight]]
+name = "Saguaro NP East"
+lat = 32.180
+lon = -110.736
+altitude_ft = 6000
+
+[[sight]]
+name = "Mount Lemmon"
+lat = 32.443
+lon = -110.788
+altitude_ft = 10000
+
+[[sight]]
+name = "Biosphere 2"
+lat = 32.579
+lon = -110.851
+altitude_ft = 5500

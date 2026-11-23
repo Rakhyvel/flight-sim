@@ -111,11 +111,16 @@ impl Controls {
             let stick_pitch = js.axis(1);
             let stick_yaw = js.axis(2);
 
-            // Add on the stick input
-            self.pitch = stick_pitch;
-            self.roll = stick_roll;
-            self.yaw = -stick_yaw;
+            self.pitch = response_curve(stick_pitch, 0.5);
+            self.roll = response_curve(stick_roll, 0.5);
+            self.yaw = -response_curve(stick_yaw, 0.5);
+
             self.throttle = (1.0 - js.axis(3)) * 0.5;
         }
     }
+}
+
+fn response_curve(x: f32, cubic: f32) -> f32 {
+    let x3 = x * x * x;
+    x * (1.0 - cubic) + x3 * cubic
 }

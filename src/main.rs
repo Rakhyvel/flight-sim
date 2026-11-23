@@ -14,7 +14,7 @@ use apricot::{
         RenderContext,
     },
 };
-use nalgebra_glm::{vec2, vec3, vec4, I32Vec2, Mat4};
+use nalgebra_glm::{vec2, vec3, vec4, DVec2, I32Vec2, Mat4};
 
 use crate::{
     airplane::Airplane,
@@ -27,7 +27,8 @@ use crate::{
     minimap::Minimap,
     region::load_regions,
     scenario::{Scenario, Start},
-    waypoint::Route,
+    tour::Tour,
+    waypoint::{Route, Waypoint, WaypointKind},
     world::{World, RENDER_DISTANCE},
 };
 
@@ -55,6 +56,7 @@ mod runway_model;
 mod scenario;
 mod terrain_color;
 mod tiles;
+mod tour;
 mod waypoint;
 mod world;
 
@@ -76,6 +78,7 @@ const BRIEFING_TIME: f64 = 10.0;
 //     - [x] mini map that's stylized like a real map
 //     - [ ] zoom in and out with [ and ]
 //     - [ ] able to program and override routes and stuff
+//     - [ ] water above sea level
 // - [ ] weather, wind, time of day
 //     - [x] distance haze, fog
 //     - [ ] Higher LOD shadow maps for the airplane, maybe cascading shadow maps
@@ -155,6 +158,8 @@ struct FlightSim {
     judge: Option<Landing>,
     /// Time since the scenario started [s]
     clock: f64,
+    /// How close the plane came to each sight
+    tour: Tour,
 }
 
 impl FlightSim {
@@ -245,6 +250,7 @@ impl FlightSim {
             scenario_path,
             judge: None,
             clock: 0.0,
+            tour: Tour::default(),
         };
 
         sim.start(renderer);
@@ -309,13 +315,34 @@ impl FlightSim {
 
         // Route to the runway, minus fixes already behind an airborne start
         let here = vec2(self.plane.pos.x, self.plane.pos.z);
-        let route = self
+        let sights: Vec<Waypoint> = self
+            .scenario
+            .sights
+            .iter()
+            .map(|s| Waypoint {
+                name: s.name.clone(),
+                pos: self.world.map.geo.to_world(s.lat, s.lon),
+                altitude: s.altitude_ft.map(|ft| ft * M_PER_FT),
+                kind: WaypointKind::Landmark,
+            })
+            .collect();
+        self.tour = Tour::new(
+            sights
+                .iter()
+                .zip(&self.scenario.sights)
+                .map(|(w, s)| (w.name.clone(), w.pos, s.radius_m)),
+        );
+
+        // Route to the landing approach
+        let out = |p: DVec2| (strip.threshold - p).dot(&strip.dir); // how far out along final [m]
+        let joins = sights.last().map(|w| w.pos).or(airborne.then_some(here));
+        let approach = self
             .world
             .approach(land)
             .into_iter()
-            .filter(|w| !airborne || (w.pos - here).dot(&strip.dir) > 0.0)
-            .collect();
-        self.route = Route::new(route);
+            .filter(|w| joins.is_none_or(|j| out(w.pos) < out(j).max(1.0))); // the threshold itself always stays
+        self.route = Route::new(sights.into_iter().chain(approach).collect());
+
         self.judge = Landing::new(&self.scenario.land, self.world.strips(), airborne);
         self.clock = 0.0;
 
@@ -340,6 +367,7 @@ impl Scene for FlightSim {
         self.clock += dt;
         if let Some(judge) = &mut self.judge {
             judge.update(&self.plane, dt);
+            self.tour.update(self.plane.pos);
         }
 
         self.controls.update_input(&app.input, app.dt.as_secs_f32());
@@ -492,7 +520,8 @@ impl Scene for FlightSim {
         renderer.draw_sky(self.light.direction());
 
         let data = FlightData::gather(&self.plane, &self.controls, &self.world, &self.route);
-        let notice = match self.judge.as_ref().and_then(Landing::debrief) {
+        let tour = self.tour.rows();
+        let notice = match self.judge.as_ref().and_then(|j| j.debrief(&tour)) {
             Some(debrief) => Some(debrief),
             None if self.clock < BRIEFING_TIME => Some(self.scenario.briefing()),
             None => None,
