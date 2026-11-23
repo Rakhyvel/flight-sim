@@ -71,6 +71,7 @@ const BRIEFING_TIME: f64 = 10.0;
 // todo:
 // - [x] good aero model
 //     - [ ] ground effect
+//     - [ ] engine torque and P-factor
 // - [x] joystick
 // - [x] better plane model
 //     - [ ] c to free mouse orbit, and joystick hat
@@ -85,10 +86,11 @@ const BRIEFING_TIME: f64 = 10.0;
 // - [ ] weather, wind, time of day
 //     - [x] distance haze, fog
 //     - [ ] Higher LOD shadow maps for the airplane, maybe cascading shadow maps
-//     - [ ] actual times of day that change in real time
+//     - [ ] actual times of day that change in real time, affected by latitude and day of year
 //     - [ ] night time, stars, moon phase and light, runway point lights (needs big apricot lift)
 //     - [x] atmospheric effects (golden hour, overcast skies, sunrise, sunset)
 //     - [ ] rain, wind, upwelling from mountains, actual raindrops when raining?
+//     - [ ] temperature affects air density
 //     - [ ] volumetric clouds that move with the wind and exist where they would exist
 //     - [x] water should look like water (reflection, refraction, waves, etc)
 //     - [x] terrain textures, not just a solid color (sat imagery?)
@@ -110,11 +112,15 @@ const BRIEFING_TIME: f64 = 10.0;
 //      - [ ] do actual engine/prop models, move rpm calc from front-end to engine backend
 // - [x] fuel, wet mass, cargo mass
 // - [x] waypoints, IFR, ATC call outs? flight plans?
+//     - [ ] keep approaches clear of terrain
 // - [ ] missions/scenarios
 //     - [x] load from toml, title, have desc, region, ToD, plane load out, waypoints, and landing objectives
 //     - [ ] main menu that lists scenarios, using UI (move delta-horizon's UI to apricot?)
 //     - [ ] custom/free-flight mission editor
 //     - [ ] scenario shuffle
+//     - [ ] start mid-air at lat/lon/alt and velocity
+//     - [ ] specific debrief titles
+// - [ ] pause menu (split up sim clock vs app clock)
 // - [ ] cockpit camera? idrc about this ngl
 // - [ ] ATIS readouts, maybe in a synthesized/phonetic voice? that'd be cool
 // - [ ] flight recorder for analysis

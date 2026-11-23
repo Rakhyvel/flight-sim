@@ -60,10 +60,11 @@ impl FlightData {
         let speed = plane.vel.norm();
         let ground_speed = vec2(plane.vel.x, plane.vel.z).norm();
 
+        const FLIGHT_PATH_MARKER_DISTANCE: f64 = 2000.0; // [m]
         let flight_path_point = (speed > 5.0).then(|| {
             world
                 .origin
-                .relative(plane.pos + plane.vel / speed * 2000.0) // TODO: name this magic number
+                .relative(plane.pos + plane.vel / speed * FLIGHT_PATH_MARKER_DISTANCE)
         });
 
         Self {

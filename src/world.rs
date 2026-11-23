@@ -445,7 +445,6 @@ impl World {
     }
 }
 
-// TODO: Move to airport.rs?
 /// A runway laid out on the map
 #[derive(Clone, Copy)]
 pub struct Strip {
