@@ -79,6 +79,7 @@ const BRIEFING_TIME: f64 = 10.0;
 //     - [ ] zoom in and out with [ and ]
 //     - [ ] able to program and override routes and stuff
 //     - [ ] water above sea level
+//     - [ ] seamless flight between two regions' tiffs
 // - [ ] weather, wind, time of day
 //     - [x] distance haze, fog
 //     - [ ] Higher LOD shadow maps for the airplane, maybe cascading shadow maps
@@ -94,6 +95,9 @@ const BRIEFING_TIME: f64 = 10.0;
 //     - [ ] control surface deflection? wing flex?
 // - [ ] camera jitter and g-force lag
 // - [x] water/ground collision
+// - [x] airports
+//     - [x] load airports and runways from ourairports csvs
+//     - [ ] display the runways based on their surface type
 // - [x] flaps, gear, slats, aerobrakes, whatever
 //     - [ ] stall horn for the cessna
 //     - [ ] g limits

@@ -11,5 +11,9 @@ name = "Seattle"
 tiff = "seattle.tif"
 
 [[regions]]
-name = "Tucson"
+name = "Tucson"     # and phoenix too I guess...
 tiff = "tucson.tif"
+
+[[regions]]
+name = "Grand Canyon"
+tiff = "grand_canyon.tif"
