@@ -5,6 +5,7 @@ fuel_kg_per_kwh = 0.28                                               # about 1,6
 empty_inertia = { roll = 90000.0, yaw = 330000.0, pitch = 280000.0 }
 wing_area = 63.1
 wingspan = 28.4
+wing_height = 1.6
 mean_chord = 2.3
 lift_slope = 5.5
 zero_lift_coefficient = 0.18

@@ -75,16 +75,17 @@ const BRIEFING_TIME: f64 = 10.0;
 
 // todo:
 // - [x] good aero model
-//     - [ ] ground effect
+//     - [x] wieselberger ground effect w/ elevator downwash
 //     - [ ] engine torque and P-factor
 // - [x] joystick
 // - [x] better plane model
 //     - [x] c to free mouse orbit, and joystick hat
 //     - [x] z to zoom in along  where the plane is pointing
-// - [x] better worldgen model (like 100km, real maps, hawaii, denver)
+// - [x] better worldgen model (USGS 1 arcsec 300km^2 maps, hawaii, denver, etc)
 //     - [x] mini map that's stylized like a real map
 //     - [ ] zoom in and out with [ and ]
 //     - [ ] make it more like an FMS, display the route name, range, ETE here, and let the player reprogram it
+//     - [ ] able to drop a point of interest, might make hiker rescue easier, or maybe make it too easy?
 //     - [ ] water above sea level, I feel like _i_ can tell where there should be water, it's really flat and in a valley, so hopefully an algorithm can too
 //     - [ ] seamless flight between two regions' tiffs
 //     - [ ] climate, so that AZ looks hot/dry, CA/CO look cool/dry, HI looks hot/wet. could probably just interpolate fixed city climate averages
@@ -112,7 +113,7 @@ const BRIEFING_TIME: f64 = 10.0;
 //     - [ ] stall horn for the cessna
 //     - [ ] g limits
 // - [ ] different planes (172, pa-28, cub, otter, citation, 737-200)
-//      - [x] load these from tomls
+//      - [x] load their aero models from tomls
 //      - [ ] actual .obj meshes and textures
 //      - [ ] do actual engine/prop models, move rpm calc from front-end to engine backend
 // - [x] fuel, wet mass, cargo mass
@@ -122,7 +123,9 @@ const BRIEFING_TIME: f64 = 10.0;
 //     - [x] load from toml, title, have desc, region, ToD, plane load out, waypoints, and landing objectives
 //     - [ ] custom/free-flight mission editor
 //     - [ ] scenario shuffle
-//     - [ ] start mid-air at lat/lon/alt and velocity
+//     - [ ] start mid-air at lat/lon/alt and velocity (grand canyon J3 run!)
+//     - [x] hiker rescue
+//     - [ ] multi-leg landing scenarios
 //     - [x] specific debrief titles
 // - [ ] main menu
 //     - [ ] main menu should use a blurry rendering of some Sight baked to an HDR as the background

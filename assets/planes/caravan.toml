@@ -5,6 +5,7 @@ fuel_kg_per_kwh = 0.45                                            # about 370 lb
 empty_inertia = { roll = 4860.0, yaw = 15510.0, pitch = 13900.0 }
 wing_area = 25.96                                                 # 279 sq ft
 wingspan = 15.88                                                  # 52 ft 1 in
+wing_height = 1.2
 mean_chord = 1.63
 lift_slope = 5.1                                                  # aspect ratio 9.7
 zero_lift_coefficient = 0.25                                      # thick, cambered wing

@@ -31,6 +31,9 @@ const BALL_DAMPING: f64 = 4.0;
 const POST_STALL_PITCH_STABILITY: f64 = 0.3;
 /// Anything under this throttle has a constant fuel burn rate
 const IDLE_THROTTLE: f64 = 0.07;
+/// How much the elevator turns the tail's lift compared to tilting the whole stabilizer (tau)
+const ELEVATOR_EFFECTIVENESS: f64 = 0.5;
+
 pub const SEA_LEVEL_AIR_DENSITY: f64 = 1.225;
 
 pub struct Airplane {
@@ -108,6 +111,36 @@ impl GroundContact {
             wheel_speed: self.wheel_speed.max(other.wheel_speed),
             airframe_speed: self.airframe_speed.max(other.airframe_speed),
             airframe: self.airframe || other.airframe,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct GroundEffect {
+    /// How much more lift the wing makes at the same angle of attack
+    lift_gain: f64,
+    /// How much of the free-air induced drag is left, 0 to 1
+    induced_drag_left: f64,
+}
+
+impl GroundEffect {
+    const FREE_AIR: Self = Self {
+        lift_gain: 1.0,
+        induced_drag_left: 1.0,
+    };
+
+    /// The ground effect at some height for a config
+    fn at(height: f64, config: &AirplaneConfig) -> Self {
+        let aspect_ratio = config.wingspan * config.wingspan / config.wing_area;
+        // wieselberger, which should be better than mccormick for high-wings
+        let height_per_span = (height / config.wingspan).clamp(0.0, 1.0);
+        let induced_drag_cut =
+            ((1.0 - 1.32 * height_per_span) / (1.05 + 7.4 * height_per_span)).max(0.0);
+        let induced_drag_left = 1.0 - induced_drag_cut;
+        let k = config.lift_slope / (std::f64::consts::PI * aspect_ratio - config.lift_slope);
+        Self {
+            lift_gain: (1.0 + k) / (1.0 + induced_drag_left * k),
+            induced_drag_left,
         }
     }
 }
@@ -201,7 +234,9 @@ impl Airplane {
 
     fn step(&mut self, controls: &Controls, dt: f64, ground: &impl Fn(f64, f64) -> (f32, Vec3)) {
         let aero = self.calc_aero_state();
-        let defl = Deflections::from_controls(controls, self.control_limits);
+        let ground_effects = self.ground_effects(ground);
+        let mut defl = Deflections::from_controls(controls, self.control_limits);
+        defl.elevator += self.tail_downwash_relief(&aero, ground_effects) / ELEVATOR_EFFECTIVENESS;
 
         self.move_flaps(dt);
         self.burn(controls.throttle as f64, aero.air_density, dt);
@@ -210,7 +245,7 @@ impl Airplane {
         let gravity = DVec3::new(0.0, -9.81, 0.0) * self.mass_properties.kg;
         let forces = self.calc_aero_forces(controls.throttle as f64, &aero, &defl);
         let torque = self.calc_aero_moments(&aero, &defl);
-        let (wing_force, wing_torque) = self.calc_wing_forces(&aero, &defl);
+        let (wing_force, wing_torque) = self.calc_wing_forces(&aero, &defl, ground_effects);
         let (ground_force, ground_torque, contact) =
             self.calc_ground_forces(controls.brakes as f64, ground);
         self.contact = self.contact.merge(contact);
@@ -335,7 +370,35 @@ impl Airplane {
         force
     }
 
-    fn calc_wing_forces(&self, aero: &AeroState, defl: &Deflections) -> (DVec3, DVec3) {
+    fn ground_effects(&self, ground: &impl Fn(f64, f64) -> (f32, Vec3)) -> [GroundEffect; 2] {
+        [-1.0, 1.0].map(|side| {
+            let lift_point = vec3(
+                0.0,
+                self.config.wing_height,
+                side * LIFT_ARM * self.config.wingspan,
+            );
+            let p = self.pos + nalgebra_glm::quat_rotate_vec3(&self.orientation, &lift_point);
+            let (h, n) = ground(p.x, p.z);
+            GroundEffect::at((p.y - h as f64) * n.y as f64, &self.config)
+        })
+    }
+
+    fn tail_downwash_relief(&self, aero: &AeroState, ground_effects: [GroundEffect; 2]) -> f64 {
+        let c = &self.config;
+        let aspect_ratio = c.wingspan * c.wingspan / c.wing_area; // TODO: move this to a method of config
+        let c_lift = self.lift_coefficient(aero.angle_of_attack, GroundEffect::FREE_AIR);
+        let downwash = 2.0 * c_lift / (std::f64::consts::PI * aspect_ratio);
+        let downwas_left =
+            (ground_effects[0].induced_drag_left + ground_effects[1].induced_drag_left) / 2.0;
+        downwash * (1.0 - downwas_left)
+    }
+
+    fn calc_wing_forces(
+        &self,
+        aero: &AeroState,
+        defl: &Deflections,
+        ground_effects: [GroundEffect; 2], // for the two wings
+    ) -> (DVec3, DVec3) {
         if aero.speed < 1.0 {
             return (DVec3::zeros(), DVec3::zeros());
         }
@@ -351,7 +414,7 @@ impl Airplane {
 
         let mut force = DVec3::zeros();
         let mut torque = DVec3::zeros();
-        for side in [-1.0, 1.0] {
+        for (side, ground_effect) in [-1.0, 1.0].into_iter().zip(ground_effects) {
             // left, right
             let arm = vec3(0.0, 0.0, side * LIFT_ARM * c.wingspan);
 
@@ -365,10 +428,12 @@ impl Airplane {
             let alpha = (-v.y).atan2(v.x);
             let q = 0.5 * aero.air_density * speed * speed;
 
-            let c_lift = self.lift_coefficient(alpha) + elevator_cl - side * aileron_cl;
+            let c_lift =
+                self.lift_coefficient(alpha, ground_effect) + elevator_cl - side * aileron_cl;
 
             let c_drag_attached = c.drag_coefficient_base
-                + c_lift * c_lift / (std::f64::consts::PI * aspect_ratio * c.oswald_efficiency)
+                + ground_effect.induced_drag_left * c_lift * c_lift
+                    / (std::f64::consts::PI * aspect_ratio * c.oswald_efficiency)
                 + self.flap(|f| f.delta_cd);
             let c_drag = c_drag_attached.max(2.0 * alpha.sin().powi(2));
 
@@ -431,19 +496,22 @@ impl Airplane {
     }
 
     /// Angle of attack where the lift curve tops out [rad]
-    fn stall_alpha(&self) -> f64 {
+    fn stall_alpha(&self, ground_effect: GroundEffect) -> f64 {
         let (zero_lift, max_cl) = self.lift_curve();
-        (max_cl - zero_lift) / self.config.lift_slope
+        let g = ground_effect.lift_gain;
+        (max_cl - zero_lift * g) / (self.config.lift_slope * g)
     }
 
-    fn lift_coefficient(&self, alpha: f64) -> f64 {
+    fn lift_coefficient(&self, alpha: f64, ground_effect: GroundEffect) -> f64 {
         let (zero_lift, max_cl) = self.lift_curve();
+        let g = ground_effect.lift_gain;
         let min_cl = self.config.min_cl;
-        let linear = zero_lift + self.config.lift_slope * alpha;
+        let linear = (zero_lift + self.config.lift_slope * alpha) * g;
 
         // aoa at which the linear curve hits its limit
-        let alpha_stall_pos = self.stall_alpha();
-        let alpha_stall_neg = (min_cl - zero_lift) / self.config.lift_slope;
+        // I happen to know a guy whose at his limit, he's one of our members
+        let alpha_stall_pos = self.stall_alpha(ground_effect);
+        let alpha_stall_neg = (min_cl - zero_lift * g) / (self.config.lift_slope * g);
 
         let flat_plate = (2.0 * alpha).sin(); // high aoa lift
         let blend_width = 8.0_f64.to_radians();
@@ -464,7 +532,7 @@ impl Airplane {
     /// Pitching moment from angle of attack. Flattens out past the stall
     fn cm_from_alpha(&self, alpha: f64) -> f64 {
         let cm_alpha = self.config.derivs.cm_alpha;
-        let stall = self.stall_alpha();
+        let stall = self.stall_alpha(GroundEffect::FREE_AIR); // tail has its own ground effect
         if alpha > stall {
             cm_alpha * (stall + POST_STALL_PITCH_STABILITY * (alpha - stall))
         } else {
@@ -773,14 +841,17 @@ mod tests {
     fn moments(p: &Airplane, controls: &Controls) -> DVec3 {
         let aero = p.calc_aero_state();
         let defl = Deflections::from_controls(controls, p.control_limits);
-        p.calc_aero_moments(&aero, &defl) + p.calc_wing_forces(&aero, &defl).1
+        p.calc_aero_moments(&aero, &defl)
+            + p.calc_wing_forces(&aero, &defl, [GroundEffect::FREE_AIR; 2])
+                .1
     }
 
     fn forces(p: &Airplane, controls: &Controls) -> DVec3 {
         let aero = p.calc_aero_state();
         let defl = Deflections::from_controls(controls, p.control_limits);
         p.calc_aero_forces(controls.throttle as f64, &aero, &defl)
-            + p.calc_wing_forces(&aero, &defl).0
+            + p.calc_wing_forces(&aero, &defl, [GroundEffect::FREE_AIR; 2])
+                .0
     }
 
     #[test]
@@ -909,6 +980,7 @@ mod tests {
             .calc_wing_forces(
                 &p.calc_aero_state(),
                 &Deflections::from_controls(&Controls::new(), p.control_limits),
+                [GroundEffect::FREE_AIR; 2],
             )
             .1
             .x;
@@ -918,7 +990,7 @@ mod tests {
     /// Where the test plane's lift curve tops out
     fn p_stall_alpha() -> f64 {
         let p = plane_at(vec3(55.0, 0.0, 0.0));
-        p.stall_alpha()
+        p.stall_alpha(GroundEffect::FREE_AIR)
     }
 
     #[test]
@@ -943,9 +1015,9 @@ mod tests {
     #[test]
     fn flaps_stall_at_a_lower_angle() {
         let mut p = plane_at(vec3(55.0, 0.0, 0.0));
-        let clean = p.stall_alpha();
+        let clean = p.stall_alpha(GroundEffect::FREE_AIR);
         p.flaps = 1.0;
-        assert!(p.stall_alpha() < clean);
+        assert!(p.stall_alpha(GroundEffect::FREE_AIR) < clean);
     }
 
     #[test]
@@ -1005,5 +1077,54 @@ mod tests {
         let mut p = plane_at(vec3(55.0, 0.0, 0.0));
         let loads = HashMap::from([("hot tub".to_string(), 500.0)]);
         assert!(p.load(1.0, &loads).is_err());
+    }
+
+    #[test]
+    fn ground_effect_adds_lift_and_cuts_drag() {
+        let p = plane_at(vec3(40.0, -4.0, 0.0)); // flaring
+        let aero = p.calc_aero_state();
+        let defl = Deflections::from_controls(&Controls::new(), p.control_limits);
+        let skimming = GroundEffect::at(2.0, &p.config);
+        let free = p
+            .calc_wing_forces(&aero, &defl, [GroundEffect::FREE_AIR; 2])
+            .0;
+        let near = p.calc_wing_forces(&aero, &defl, [skimming; 2]).0;
+
+        let flow = p.vel.normalize();
+        assert!(near.y > free.y, "more lift near the ground");
+        assert!(
+            -near.dot(&flow) < -free.dot(&flow),
+            "less drag near the ground"
+        );
+    }
+
+    #[test]
+    fn ground_effect_fades_by_a_wingspan_up() {
+        let p = plane_at(vec3(55.0, 0.0, 0.0));
+        let up_high = GroundEffect::at(p.config.wingspan, &p.config);
+        assert!(up_high.induced_drag_left > 0.99);
+        assert!(up_high.lift_gain < 1.01);
+    }
+
+    #[test]
+    fn stalls_sooner_in_ground_effect() {
+        let p = plane_at(vec3(55.0, 0.0, 0.0));
+        let skimming = GroundEffect::at(2.0, &p.config);
+        assert!(p.stall_alpha(skimming) < p.stall_alpha(GroundEffect::FREE_AIR));
+    }
+
+    #[test]
+    fn nose_drops_into_ground_effect() {
+        let p = plane_at(vec3(30.0, -3.0, 0.0)); // slow, nose up
+        let aero = p.calc_aero_state();
+        let skimming = GroundEffect::at(2.0, &p.config);
+        let mut defl = Deflections::from_controls(&Controls::new(), p.control_limits);
+        let free_air = p.calc_aero_moments(&aero, &defl).z;
+
+        defl.elevator += p.tail_downwash_relief(&aero, [skimming; 2]) / ELEVATOR_EFFECTIVENESS;
+        assert!(
+            p.calc_aero_moments(&aero, &defl).z < free_air,
+            "less downwash on the tail"
+        );
     }
 }

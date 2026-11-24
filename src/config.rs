@@ -15,6 +15,8 @@ pub struct AirplaneConfig {
     pub wing_area: f64,
     /// Wingspan [m]
     pub wingspan: f64,
+    /// How far above the plane's origin the wing's lift acts [m]
+    pub wing_height: f64,
     /// Chord thats a bit rude [m]
     pub mean_chord: f64,
     /// Rotational inertia tensor about the center of gravity of the plane when empty
