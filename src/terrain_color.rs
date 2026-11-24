@@ -8,6 +8,7 @@ use crate::heightmap::Heightmap;
 
 // In linear albedo
 const SEA_FLOOR: [f32; 3] = [0.18, 0.16, 0.11];
+const WATER: [f32; 3] = [0.025, 0.12, 0.17];
 const SAND: [f32; 3] = [0.36, 0.31, 0.22];
 const MEADOW: [f32; 3] = [0.07, 0.11, 0.035];
 const DRY_GRASS: [f32; 3] = [0.17, 0.14, 0.07];
@@ -58,6 +59,14 @@ fn terrain_albedo(map: &Heightmap, gx: i32, gz: i32, texel_m: f32) -> Vec3 {
         * 0.25;
     let hollow = ((ring - h) / 15.0).clamp(-1.0, 1.0);
 
+    // TODO: This heuristic does ok with detecting rivers, but it misses some segments and also has too many false positives with basin or edges of hills
+    //       I think D8 flow accumulation would do way better and probably not even be all that hard tbh ngl
+    //       Also it doesn't detect lakes at all, probably need some kinda connected components alg or something
+    let relief = local_relief(map, gx, gz);
+    let flatness = (1.0 - smoothstep(0.015, 0.06, slope)) * (1.0 - smoothstep(2.0, 10.0, relief));
+    let basin = smoothstep(0.1, 0.6, hollow);
+    let water = flatness * basin;
+
     // Add big patches and fine speckle
     let patches = value_noise(wx, wz, 1.0 / 900.0, 3, 1);
     let speckle = value_noise(wx, wz, 1.0 / 60.0, 2, 2);
@@ -90,7 +99,24 @@ fn terrain_albedo(map: &Heightmap, gx: i32, gz: i32, texel_m: f32) -> Vec3 {
     ) * (1.0 - smoothstep(0.7, 1.1, slope));
     c = c.lerp(&SNOW.into(), snow);
 
-    c * (0.85 + 0.3 * speckle)
+    c = c.lerp(&WATER.into(), water);
+
+    c * (0.85 + 0.3 * speckle * (1.0 - water))
+}
+
+fn local_relief(map: &Heightmap, gx: i32, gz: i32) -> f32 {
+    let mut lo = f32::INFINITY;
+    let mut hi = f32::NEG_INFINITY;
+
+    for dz in [-2, 0, 2] {
+        for dx in [-2, 0, 2] {
+            let h = map.sample(gx + dx, gz + dz);
+            lo = lo.min(h);
+            hi = hi.max(h);
+        }
+    }
+
+    hi - lo
 }
 
 fn lerp(a: [f32; 3], b: [f32; 3], t: f32) -> Vec3 {

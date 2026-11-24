@@ -1,5 +1,5 @@
-///! Defines the plane mesh
-///! TODO: The meshes should be taken from a .obj, not generated here
+//! Defines the plane mesh
+//! TODO: The meshes should be taken from a .obj, not generated here
 use apricot::mesh::{MeshData, Vertex};
 use nalgebra_glm::{vec2, vec3, Vec3};
 

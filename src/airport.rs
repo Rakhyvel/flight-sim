@@ -1,4 +1,4 @@
-///! Stuff for deserializing airport and runway and navaid data from OurAirports.com
+//! Stuff for deserializing airport and runway and navaid data from OurAirports.com
 use serde::Deserialize;
 use std::error::Error;
 

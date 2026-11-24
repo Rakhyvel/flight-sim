@@ -8,9 +8,6 @@ pub struct Controls {
     pub yaw: f32,      // -1 to 1
     pub throttle: f32, // 0 to 1
 
-    // Camera controls
-    pub pan: f32,
-
     // Component controls
     pub brakes: f32,
     /// Flap switch this frame, +1 a notch down, -1 a notch up, 0 left alone
@@ -20,7 +17,6 @@ pub struct Controls {
     target_pitch: f32,
     target_roll: f32,
     target_yaw: f32,
-    target_pan: f32,
     target_brakes: f32,
 }
 
@@ -32,15 +28,12 @@ impl Controls {
             yaw: 0.0,
             throttle: 0.0,
 
-            pan: 0.0,
-
             brakes: 0.0,
             flap_step: 0,
 
             target_pitch: 0.0,
             target_roll: 0.0,
             target_yaw: 0.0,
-            target_pan: 0.0,
             target_brakes: 0.0,
         }
     }
@@ -49,7 +42,6 @@ impl Controls {
         self.target_roll = 0.0;
         self.target_pitch = 0.0;
         self.target_yaw = 0.0;
-        self.target_pan = 0.0;
         self.target_brakes = 0.0;
         self.flap_step = 0;
 
@@ -80,12 +72,6 @@ impl Controls {
         if input.key_down(sdl2::keyboard::Scancode::E) {
             self.target_roll += 1.0;
         }
-        if input.key_down(sdl2::keyboard::Scancode::Left) {
-            self.target_pan -= 1.0;
-        }
-        if input.key_down(sdl2::keyboard::Scancode::Right) {
-            self.target_pan += 1.0;
-        }
         if input.key_down(sdl2::keyboard::Scancode::B) {
             self.target_brakes = 1.0;
         }
@@ -101,8 +87,6 @@ impl Controls {
         self.pitch += (self.target_pitch - self.pitch) * smoothing.min(1.0);
         self.roll += (self.target_roll - self.roll) * smoothing.min(1.0);
         self.yaw += (self.target_yaw - self.yaw) * smoothing.min(1.0);
-
-        self.pan += (self.target_pan - self.pan) * smoothing.min(1.0);
 
         self.brakes += (self.target_brakes - self.brakes) * smoothing.min(1.0);
 

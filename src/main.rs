@@ -1,9 +1,6 @@
-use std::f32::consts::FRAC_PI_4;
-
 use apricot::{
     app::{run, App, AppConfig, Scene, SceneCommand},
     audio::SynthStream,
-    camera::{Camera, ProjectionKind},
     error::Error,
     input::Scancode,
     mesh::MeshData,
@@ -19,6 +16,7 @@ use nalgebra_glm::{vec2, vec3, vec4, DVec2, I32Vec2, Mat4};
 use crate::{
     airplane::Airplane,
     atmosphere::Atmosphere,
+    chase_camera::ChaseCamera,
     control::Controls,
     engine_sound::EngineSound,
     flight_data::FlightData,
@@ -42,6 +40,7 @@ macro_rules! glsl {
 mod airplane;
 mod airport;
 mod atmosphere;
+mod chase_camera;
 mod config;
 mod control;
 mod engine_sound;
@@ -74,8 +73,8 @@ const BRIEFING_TIME: f64 = 10.0;
 //     - [ ] engine torque and P-factor
 // - [x] joystick
 // - [x] better plane model
-//     - [ ] c to free mouse orbit, and joystick hat
-//     - [ ] z to zoom in ON THE VELOCITY VECTOR not the plane
+//     - [x] c to free mouse orbit, and joystick hat
+//     - [x] z to zoom in along  where the plane is pointing
 // - [x] better worldgen model (like 100km, real maps, hawaii, denver)
 //     - [x] mini map that's stylized like a real map
 //     - [ ] zoom in and out with [ and ]
@@ -97,7 +96,7 @@ const BRIEFING_TIME: f64 = 10.0;
 //     - [ ] vegetation scatter based on the actual biomes designated by terrain_color (move biomes out to its own thing, so that vegetation and color read from it?)
 //     - [ ] prop blur
 //     - [ ] control surface deflection? wing flex?
-// - [ ] camera jitter and g-force lag
+// - [x] camera jitter and g-force lag
 // - [x] water/ground collision
 // - [x] airports
 //     - [x] load airports and runways from ourairports csvs
@@ -121,6 +120,7 @@ const BRIEFING_TIME: f64 = 10.0;
 //     - [ ] start mid-air at lat/lon/alt and velocity
 //     - [ ] specific debrief titles
 // - [ ] pause menu (split up sim clock vs app clock)
+// - [ ] ability to configure joysticks and key bindings
 // - [ ] cockpit camera? idrc about this ngl
 // - [ ] ATIS readouts, maybe in a synthesized/phonetic voice? that'd be cool
 // - [ ] flight recorder for analysis
@@ -154,9 +154,7 @@ struct FlightSim {
     prop_angle: f64, // [rad]
     prop_rps: f64,   // displayed revolutions per second
 
-    /// How far behind the plane the camera sits
-    cam_distance: f64,
-    fov: f32,
+    camera: ChaseCamera,
 
     engine_rpm: f64,
     engine_sound: Option<SynthStream<EngineSound>>,
@@ -249,8 +247,7 @@ impl FlightSim {
             atmosphere,
             prop_angle: 0.0,
             prop_rps: 0.0,
-            cam_distance: 25.0,
-            fov: FRAC_PI_4,
+            camera: ChaseCamera::new(),
             engine_rpm: 700.0,
             engine_sound: app.audio.start_synth(EngineSound::new()),
             world,
@@ -330,6 +327,7 @@ impl FlightSim {
                 true
             }
         };
+        self.camera.reset(&self.plane);
 
         // Route to the runway, minus fixes already behind an airborne start
         let here = vec2(self.plane.pos.x, self.plane.pos.z);
@@ -428,49 +426,16 @@ impl Scene for FlightSim {
         self.prop_angle =
             (self.prop_angle + self.prop_rps * std::f64::consts::TAU * dt) % std::f64::consts::TAU;
 
-        let forward = nalgebra_glm::quat_rotate_vec3(&self.plane.orientation, &vec3(1.0, 0.0, 0.0));
-        let up = nalgebra_glm::quat_rotate_vec3(&self.plane.orientation, &vec3(0.0, 1.0, 0.0));
-
-        // Extract normalized velocity direction to feel sideways/vertical drift (AoA/sideslip)
-        let speed = self.plane.vel.norm();
-        let vel_dir = if speed > 0.1 {
-            self.plane.vel / speed
-        } else {
-            forward
-        };
-
-        // Blend forward vector with velocity vector to give that in flight feel
-        let chase_dir = (forward * 0.8 + vel_dir * 0.2).normalize();
-
-        // Orbit around the plane
-        let max_pan = std::f64::consts::PI * 0.5; // TODO: Could be a setting?
-        let view_dir =
-            nalgebra_glm::rotate_vec3(&chase_dir, -self.controls.pan as f64 * max_pan, &up);
-
-        // Position camera behind and slightly above the blended vector
-        let plane_pos = self.plane.pos - self.world.origin.pos;
-        self.cam_distance =
-            (self.cam_distance * 0.9_f64.powf(app.input.mouse_wheel as f64)).clamp(0.8, 400.0);
-        let target_fov = if app.input.key_down(Scancode::Z) {
-            12.0_f32.to_radians()
-        } else {
-            FRAC_PI_4
-        };
-        self.fov += (target_fov - self.fov) * (8.0 * dt as f32).min(1.0);
-        let cam_pos = plane_pos - view_dir * self.cam_distance + up * (self.cam_distance * 0.24);
-
-        let camera = Camera::new(
-            cam_pos.cast(),
-            (plane_pos + view_dir * 10.0).cast(), // Look ahead of the plane
-            up.cast(),
-            ProjectionKind::Perspective {
-                fov_rad: self.fov,
-                near: 3.0,
-                far: RENDER_DISTANCE as f32,
-            },
+        // Chase the plane
+        let camera = self.camera.update(
+            &app.input,
+            app.cursor_captured(),
+            &self.plane,
+            &self.world.origin,
+            dt,
         );
-
         app.renderer.set_camera(camera);
+
         SceneCommand::None
     }
 
