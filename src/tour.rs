@@ -1,7 +1,8 @@
-use nalgebra_glm::{vec2, DVec2, DVec3};
+use nalgebra_glm::{vec2, DVec2};
 
 use crate::{
-    landing::{DebriefRow, Grade},
+    airplane::Airplane,
+    judge::{DebriefRow, Grade, Objective},
     units::{FT_PER_M, M_PER_NM},
 };
 
@@ -16,7 +17,6 @@ struct Sighting {
 }
 
 /// The sights on a tour, and how close the plane has come to each
-#[derive(Default)]
 pub struct Tour {
     sights: Vec<Sighting>,
 }
@@ -36,22 +36,27 @@ impl Tour {
                 .collect(),
         }
     }
+}
 
+impl Objective for Tour {
     /// Note how close the plane at `plane_pos` is to each sight
-    pub fn update(&mut self, plane_pos: DVec3) {
-        let here = vec2(plane_pos.x, plane_pos.z);
+    fn update(&mut self, plane: &Airplane, _dt: f64) {
+        let here = vec2(plane.pos.x, plane.pos.z);
         for s in &mut self.sights {
             s.closest = s.closest.min((s.pos - here).norm());
         }
     }
 
-    pub fn rows(&self) -> Vec<DebriefRow> {
+    fn rows(&self) -> Vec<DebriefRow> {
         self.sights
             .iter()
-            .map(|s| DebriefRow {
-                label: s.name.clone(),
-                value: distance(s.closest),
-                grade: Grade::by(s.closest, s.radius, 2.0 * s.radius, 4.0 * s.radius),
+            .map(|s| {
+                DebriefRow::new(
+                    s.name.clone(),
+                    distance(s.closest),
+                    Grade::by(s.closest, s.radius, 2.0 * s.radius, 4.0 * s.radius),
+                    format!("Missed {}", s.name),
+                )
             })
             .collect()
     }

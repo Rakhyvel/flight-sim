@@ -4,7 +4,7 @@ use nalgebra_glm::{vec2, DVec2};
 
 use crate::{
     airplane::Airplane,
-    hud::{Mood, Notice},
+    judge::{DebriefRow, Ending, Grade, Objective},
     units::FT_PER_M,
     world::Strip,
 };
@@ -19,48 +19,6 @@ const STOPPED_SPEED: f64 = 1.0;
 const CRASH_SINK: f64 = 4.5;
 /// Anything but a wheel hitting faster than this is a crash [m/s], slower is a scrape
 const CRASH_IMPACT: f64 = 2.0;
-
-const AGAIN: &str = "R to fly again";
-
-// TODO: Common between landing and tour (and likely other objectives), doesn't belong here
-/// One line of a debrief
-pub struct DebriefRow {
-    pub label: String,
-    pub value: String,
-    pub grade: Grade,
-}
-
-// TODO: Common between landing and tour (and likely other objectives), doesn't belong here
-/// How well one part of a landing went, best first
-#[derive(Clone, Copy, PartialEq, PartialOrd)]
-pub enum Grade {
-    Butter,
-    Good,
-    Poor,
-    Fail,
-}
-
-impl Grade {
-    pub fn by(value: f64, butter: f64, good: f64, poor: f64) -> Self {
-        if value <= butter {
-            Grade::Butter
-        } else if value <= good {
-            Grade::Good
-        } else if value <= poor {
-            Grade::Poor
-        } else {
-            Grade::Fail
-        }
-    }
-
-    fn mood(self) -> Mood {
-        match self {
-            Grade::Butter | Grade::Good => Mood::Good,
-            Grade::Poor => Mood::Warn,
-            Grade::Fail => Mood::Bad,
-        }
-    }
-}
 
 /// The moment the wheels met the ground
 #[derive(Clone, Copy)]
@@ -119,8 +77,46 @@ impl Landing {
         })
     }
 
+    pub fn ending(&self) -> Option<Ending> {
+        match self.phase {
+            Phase::Landed(..) => Some(Ending::Stopped),
+            Phase::Crashed(why) => Some(Ending::Crashed(why)),
+            _ => None,
+        }
+    }
+
+    fn touchdown(&self, plane: &Airplane, sink_rate: f64) -> Touchdown {
+        let here = vec2(plane.pos.x, plane.pos.z);
+        let heading = plane.heading();
+
+        // Grade against the runway it came down on, or the target if it missed them all
+        let runway = self.runway_at(here, heading).unwrap_or(self.target);
+        let strip = &self.runways[runway].1;
+
+        Touchdown {
+            runway,
+            sink_rate,
+            spot: strip.local(here),
+            crab: angle_off(heading, strip.heading()),
+            bounces: 0,
+        }
+    }
+
+    /// Get the index of the runway at `p` with heading closest to `heading`
+    fn runway_at(&self, p: DVec2, heading: f64) -> Option<usize> {
+        let off = |s: &Strip| angle_off(heading, s.heading()).abs();
+        self.runways
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, s))| s.contains(p))
+            .min_by(|(_, (_, a)), (_, (_, b))| off(a).total_cmp(&off(b)))
+            .map(|(i, _)| i)
+    }
+}
+
+impl Objective for Landing {
     /// Follow `plane` through the last `dt` [s]
-    pub fn update(&mut self, plane: &Airplane, dt: f64) {
+    fn update(&mut self, plane: &Airplane, dt: f64) {
         let contact = plane.contact();
         let here = vec2(plane.pos.x, plane.pos.z);
         let ground_speed = vec2(plane.vel.x, plane.vel.z).norm();
@@ -173,156 +169,89 @@ impl Landing {
         }
     }
 
-    // TODO: Common between landing and tour (and likely other objectives), doesn't belong here
-    /// How it went, once the plane has stopped or crashed, with `before` listed ahead of the landing
-    pub fn debrief(&self, before: &[DebriefRow]) -> Option<Notice> {
-        let (td, stopped_on_runway) = match self.phase {
-            Phase::Landed(td, on_runway) => (td, on_runway),
-            Phase::Crashed(why) => {
-                return Some(Notice {
-                    title: "Crashed".to_string(),
-                    lines: vec![
-                        (why.to_string(), Mood::Bad),
-                        (AGAIN.to_string(), Mood::Plain),
-                    ],
-                })
-            }
-            _ => return None,
+    fn rows(&self) -> Vec<DebriefRow> {
+        let Phase::Landed(td, stopped_on_runway) = self.phase else {
+            return Vec::new(); // nothing to grade until it's down and stopped
         };
-        let (name, s) = &self.runways[td.runway];
-        let wrong = td.runway != self.target;
-
-        // Grade each part
+        let (name, strip) = &self.runways[td.runway];
+        let target = &self.runways[self.target].0;
         let sink_fpm = td.sink_rate * FT_PER_M * 60.0;
         let (past, right) = (td.spot.x, td.spot.y);
-        let zone = if past < 0.0 {
-            Grade::Fail
-        } else {
-            Grade::by(past / s.length, 1.0 / 3.0, 0.5, 1.0)
-        };
         let crab_deg = td.crab.to_degrees().abs();
-        let rows = [
-            (
-                "Runway",
-                if wrong {
-                    format!("{name}, not {}", self.runways[self.target].0)
-                } else {
-                    name.clone()
-                },
-                if wrong { Grade::Fail } else { Grade::Butter },
-            ),
-            (
+        let side = if right < 0.0 { "left" } else { "right" };
+
+        vec![
+            if td.runway == self.target {
+                DebriefRow::new("Runway", name.clone(), Grade::Butter, "")
+            } else {
+                DebriefRow::new(
+                    "Runway",
+                    format!("{name}, not {target}"),
+                    Grade::Fail,
+                    "Advise ready to copy a phone number",
+                )
+            },
+            DebriefRow::new(
                 "Sink rate",
                 format!("{sink_fpm:.0} fpm"),
                 Grade::by(sink_fpm, 200.0, 400.0, 700.0),
+                "Hard landing",
             ),
-            (
-                "Touchdown",
-                if past < 0.0 {
-                    format!("{:.0} ft short", -past * FT_PER_M)
-                } else {
-                    format!("{:.0} ft past the threshold", past * FT_PER_M)
-                },
-                zone,
-            ),
-            (
+            if past < 0.0 {
+                DebriefRow::new(
+                    "Touchdown",
+                    format!("{:.0} ft short", -past * FT_PER_M),
+                    Grade::Fail,
+                    "Landed short",
+                )
+            } else {
+                DebriefRow::new(
+                    "Touchdown",
+                    format!("{:.0} ft past the threshold", past * FT_PER_M),
+                    Grade::by(past / strip.length, 1.0 / 3.0, 0.5, 1.0),
+                    "Landed long",
+                )
+            },
+            DebriefRow::new(
                 "Centerline",
-                format!(
-                    "{:.0} ft {}",
-                    right.abs() * FT_PER_M,
-                    if right < 0.0 { "left" } else { "right" }
+                format!("{:.0} ft {side}", right.abs() * FT_PER_M),
+                Grade::by(
+                    right.abs(),
+                    0.1 * strip.width,
+                    0.25 * strip.width,
+                    0.5 * strip.width,
                 ),
-                Grade::by(right.abs(), 0.1 * s.width, 0.25 * s.width, 0.5 * s.width),
+                "Off the centerline",
             ),
-            (
+            DebriefRow::new(
                 "Crab",
                 format!("{crab_deg:.0} deg"),
                 Grade::by(crab_deg, 3.0, 8.0, 20.0),
+                "Landed sideways",
             ),
-            (
+            DebriefRow::new(
                 "Bounces",
                 td.bounces.to_string(),
                 Grade::by(td.bounces as f64, 0.0, 1.0, 3.0),
+                "Kangaroo",
             ),
-            (
+            DebriefRow::new(
                 "Scrapes",
                 self.scrapes.to_string(),
                 Grade::by(self.scrapes as f64, 0.0, 0.0, 1.0),
+                "Any landing you can walk away from...",
             ),
-            (
-                "Stopped",
-                if stopped_on_runway {
-                    "on the runway"
-                } else {
-                    "off the runway"
-                }
-                .to_string(),
-                if stopped_on_runway {
-                    Grade::Butter
-                } else {
-                    Grade::Fail
-                },
-            ),
-        ];
-
-        // Rows from before the landing go first
-        let rows: Vec<(&str, String, Grade)> = before
-            .iter()
-            .map(|row| (row.label.as_str(), row.value.clone(), row.grade))
-            .chain(rows)
-            .collect();
-
-        // The worst part sets the headline
-        let worst = rows
-            .iter()
-            .map(|r| r.2)
-            .fold(Grade::Butter, |a, b| if b > a { b } else { a });
-        let title = match worst {
-            _ if wrong => "Advise ready to copy a phone number",
-            Grade::Butter => "Butter!",
-            Grade::Good => "Nice landing",
-            Grade::Poor => "Could be worse",
-            Grade::Fail => "Any landing you can walk away from...", // TODO: Change to something else if its Fail because of missed sights
-        };
-
-        let width = rows.iter().map(|r| r.0.len()).max().unwrap_or(0) + 2;
-        let mut lines: Vec<(String, Mood)> = rows
-            .into_iter()
-            .map(|(label, value, grade)| (format!("{label:<width$}{value}"), grade.mood())) // the HUD font is monospaced, so this lines up
-            .collect();
-        lines.push((AGAIN.to_string(), Mood::Plain));
-        Some(Notice {
-            title: title.to_string(),
-            lines,
-        })
-    }
-
-    fn touchdown(&self, plane: &Airplane, sink_rate: f64) -> Touchdown {
-        let here = vec2(plane.pos.x, plane.pos.z);
-        let heading = plane.heading();
-
-        // Grade against the runway it came down on, or the target if it missed them all
-        let runway = self.runway_at(here, heading).unwrap_or(self.target);
-        let strip = &self.runways[runway].1;
-
-        Touchdown {
-            runway,
-            sink_rate,
-            spot: strip.local(here),
-            crab: angle_off(heading, strip.heading()),
-            bounces: 0,
-        }
-    }
-
-    /// Get the index of the runway at `p` with heading closest to `heading`
-    fn runway_at(&self, p: DVec2, heading: f64) -> Option<usize> {
-        let off = |s: &Strip| angle_off(heading, s.heading()).abs();
-        self.runways
-            .iter()
-            .enumerate()
-            .filter(|(_, (_, s))| s.contains(p))
-            .min_by(|(_, (_, a)), (_, (_, b))| off(a).total_cmp(&off(b)))
-            .map(|(i, _)| i)
+            if stopped_on_runway {
+                DebriefRow::new("Stopped", "on the runway", Grade::Butter, "")
+            } else {
+                DebriefRow::new(
+                    "Stopped",
+                    "off the runway",
+                    Grade::Fail,
+                    "Ran off the runway",
+                )
+            },
+        ]
     }
 }
 

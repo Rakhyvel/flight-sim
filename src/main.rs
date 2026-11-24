@@ -21,6 +21,7 @@ use crate::{
     engine_sound::EngineSound,
     flight_data::FlightData,
     hud::Hud,
+    judge::Judge,
     landing::Landing,
     minimap::Minimap,
     region::load_regions,
@@ -171,11 +172,9 @@ struct FlightSim {
     /// Where `scenario` was read from, to read it again on restart
     scenario_path: String,
     /// Grades the landing, from the first `start`
-    judge: Option<Landing>,
+    judge: Option<Judge>,
     /// Time since the scenario started [s]
     clock: f64,
-    /// How close the plane came to each sight
-    tour: Tour,
 }
 
 impl FlightSim {
@@ -265,7 +264,6 @@ impl FlightSim {
             scenario_path,
             judge: None,
             clock: 0.0,
-            tour: Tour::default(),
         };
 
         sim.start(renderer);
@@ -342,7 +340,7 @@ impl FlightSim {
                 kind: WaypointKind::Landmark,
             })
             .collect();
-        self.tour = Tour::new(
+        let tour = Tour::new(
             sights
                 .iter()
                 .zip(&self.scenario.sights)
@@ -359,7 +357,8 @@ impl FlightSim {
             .filter(|w| joins.is_none_or(|j| out(w.pos) < out(j).max(1.0))); // the threshold itself always stays
         self.route = Route::new(sights.into_iter().chain(approach).collect());
 
-        self.judge = Landing::new(&self.scenario.land, self.world.strips(), airborne);
+        self.judge = Landing::new(&self.scenario.land, self.world.strips(), airborne)
+            .map(|landing| Judge::new(landing, vec![Box::new(tour)]));
         self.clock = 0.0;
 
         // Ground around the new spot, all at once
@@ -383,7 +382,6 @@ impl Scene for FlightSim {
         self.clock += dt;
         if let Some(judge) = &mut self.judge {
             judge.update(&self.plane, dt);
-            self.tour.update(self.plane.pos);
         }
 
         self.controls.update_input(&app.input, app.dt.as_secs_f32());
@@ -507,8 +505,7 @@ impl Scene for FlightSim {
         renderer.draw_sky(self.light.direction());
 
         let data = FlightData::gather(&self.plane, &self.controls, &self.world, &self.route);
-        let tour = self.tour.rows();
-        let notice = match self.judge.as_ref().and_then(|j| j.debrief(&tour)) {
+        let notice = match self.judge.as_ref().and_then(Judge::debrief) {
             Some(debrief) => Some(debrief),
             None if self.clock < BRIEFING_TIME => Some(self.scenario.briefing()),
             None => None,
