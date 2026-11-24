@@ -18,6 +18,8 @@ max_thrust = 8500.0
 max_power = 503000.0   # 675 shp PT6A-114A
 prop_efficiency = 0.75
 
+field_length_m = 360.0
+
 control_limits = { elevator = 22.0, aileron = 18.0, rudder = 22.0 }
 
 contacts = [

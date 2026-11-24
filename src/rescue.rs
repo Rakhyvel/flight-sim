@@ -4,7 +4,7 @@ use nalgebra_glm::{vec2, vec3, DVec2, DVec3, Vec3, Vec4};
 use rand::Rng;
 
 use crate::{
-    airplane::Airplane,
+    airplane::{air_density, Airplane, SEA_LEVEL_AIR_DENSITY},
     hud::{Mood, Notice},
     judge::{DebriefRow, Grade, Marker, Objective},
     scenario::RescueSetup,
@@ -64,24 +64,23 @@ impl Rescue {
             .station(&setup.station)
             .ok_or_else(|| format!("the plane has no station {}", setup.station))?;
 
-        let (middle, dir) = find_clearing(
-            area,
-            setup.search_radius_m,
-            setup.clearing_length_m,
-            ground,
-            rng,
-        )
-        .ok_or_else(|| {
-            format!(
-                "nowhere flat within {:.0}m of {}",
-                setup.search_radius_m, setup.area
-            )
-        })?;
+        let sea_level_length = setup.clearing_length_m.unwrap_or(plane.field_length());
+        let clearing = find_clearing(area, setup.search_radius_m, sea_level_length, ground, rng)
+            .ok_or_else(|| {
+                format!(
+                    "nowhere flat within {:.0}m of {}",
+                    setup.search_radius_m, setup.area
+                )
+            })?;
 
         // figure out where the hikers actually stand
-        let end = if rng.gen::<bool>() { dir } else { -dir };
-        let side = vec2(-dir.y, dir.x);
-        let spot = middle + end * setup.clearing_length_m / 2.0 + side * HIKER_SIDE_OFFSET;
+        let end = if rng.gen::<bool>() {
+            clearing.dir
+        } else {
+            -clearing.dir
+        };
+        let side = vec2(-clearing.dir.y, clearing.dir.x);
+        let spot = clearing.middle + end * clearing.length / 2.0 + side * HIKER_SIDE_OFFSET;
         let (height, _) = ground(spot.x, spot.y);
 
         Ok(Self {
@@ -93,6 +92,11 @@ impl Rescue {
             phase: Phase::Waiting,
             clock: 0.0,
         })
+    }
+
+    /// Where the hikers are, on the ground [m, world]
+    pub fn spot(&self) -> DVec3 {
+        self.spot
     }
 }
 
@@ -177,21 +181,36 @@ impl Objective for Rescue {
     }
 }
 
+struct Clearing {
+    middle: DVec2,
+    dir: DVec2,
+    length: f64,
+}
+
 /// Find a nice flat place that's possible to land on, along some dir
 fn find_clearing(
     center: DVec2,
     radius: f64,
-    length: f64,
+    sea_level_length: f64,
     ground: &impl Fn(f64, f64) -> (f32, Vec3),
     rng: &mut impl Rng,
-) -> Option<(DVec2, DVec2)> {
+) -> Option<Clearing> {
     (0..CLEARING_TRIES).find_map(|_| {
         let distance = radius * rng.gen::<f64>().sqrt();
         let bearing = rng.gen_range(0.0..TAU);
         let middle = center + vec2(bearing.cos(), bearing.sin()) * distance;
         let heading = rng.gen_range(0.0..PI);
         let dir = vec2(heading.cos(), heading.sin());
-        is_clear(middle, dir, length, ground).then_some((middle, dir))
+
+        let (height, _) = ground(middle.x, middle.y);
+        let thin_air = SEA_LEVEL_AIR_DENSITY / air_density(height as f64);
+        let length = sea_level_length * thin_air * thin_air;
+
+        is_clear(middle, dir, length, ground).then_some(Clearing {
+            middle,
+            dir,
+            length,
+        })
     })
 }
 
@@ -236,9 +255,10 @@ mod tests {
     fn clearings_are_on_the_flat() {
         let mut rng = StdRng::seed_from_u64(1);
         for _ in 0..20 {
-            let (middle, dir) = find_clearing(vec2(1000.0, 0.0), 2000.0, 300.0, &ground, &mut rng)
+            let clearing = find_clearing(vec2(1000.0, 0.0), 2000.0, 300.0, &ground, &mut rng)
                 .expect("half the disc is flat");
-            for end in [middle - dir * 150.0, middle + dir * 150.0] {
+            let half = clearing.dir * clearing.length / 2.0;
+            for end in [clearing.middle - half, clearing.middle + half] {
                 assert!(end.x > 1000.0, "an end of the strip is on the slope");
             }
         }

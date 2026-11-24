@@ -177,7 +177,9 @@ impl TileTree {
 
     /// How far `pos` is from the closest part of the _terrain_ of `tile` [m]
     fn distance(&self, tile: Tile, pos: DVec3) -> f64 {
-        self.ground_distance(tile, pos).hypot(pos.y.max(0.0))
+        let peak = self.heights.get(tile).map_or(0.0, |h| h.peak as f64);
+        self.ground_distance(tile, pos)
+            .hypot((pos.y - peak).max(0.0))
     }
 
     /// Whether `tile` is too coarse to draw from `pos`, either its colors or its shape

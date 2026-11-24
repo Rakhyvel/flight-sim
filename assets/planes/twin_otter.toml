@@ -18,6 +18,8 @@ max_power = 925000.0   # 2 x 620 shp PT6A-27
 fuel_kg_per_kwh = 0.40 # about 600 lb/h at cruise
 prop_efficiency = 0.8
 
+field_length_m = 260.0
+
 control_limits = { elevator = 22.0, aileron = 17.0, rudder = 22.0 }
 
 contacts = [

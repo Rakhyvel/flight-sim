@@ -31,6 +31,7 @@ const BALL_DAMPING: f64 = 4.0;
 const POST_STALL_PITCH_STABILITY: f64 = 0.3;
 /// Anything under this throttle has a constant fuel burn rate
 const IDLE_THROTTLE: f64 = 0.07;
+pub const SEA_LEVEL_AIR_DENSITY: f64 = 1.225;
 
 pub struct Airplane {
     // State
@@ -266,7 +267,7 @@ impl Airplane {
         if !self.engine_running() {
             return 0.0;
         }
-        throttle * self.config.max_power * density / 1.225
+        throttle * self.config.max_power * density / SEA_LEVEL_AIR_DENSITY
     }
 
     /// The torque [body space] that a `force` [world space] applies about the CoG
@@ -289,8 +290,7 @@ impl Airplane {
     fn calc_aero_state(&self) -> AeroState {
         let speed = self.vel.norm();
 
-        // TODO: Calc with temp too
-        let air_density = 1.225 * (-self.pos.y / 8500.0).exp();
+        let air_density = air_density(self.pos.y);
         let dynamic_pressure = 0.5 * air_density * speed * speed;
 
         // Transform velocity into local body-space
@@ -740,11 +740,22 @@ impl Airplane {
             &self.station_load_masses,
         )
     }
+
+    /// Takeoff ground roll at max weight at sea level [m]
+    pub fn field_length(&self) -> f64 {
+        self.config.field_length_m
+    }
 }
 
 /// Friction against sliding at `v`, up to `mu * normal_force`
 fn friction(v: DVec3, mu: f64, normal_force: f64) -> DVec3 {
     -v * (mu * normal_force / v.norm().max(SLIP_SPEED))
+}
+
+/// Air density at `altitude` above sea level [kg/m^3]
+pub fn air_density(altitude: f64) -> f64 {
+    // TODO: Calc with temp too
+    SEA_LEVEL_AIR_DENSITY * (-altitude / 8500.0).exp()
 }
 
 #[cfg(test)]
@@ -962,7 +973,7 @@ mod tests {
     fn burning_fuel_lightens_the_plane() {
         let mut p = plane_at(vec3(55.0, 0.0, 0.0));
         let full = p.mass_properties.kg;
-        p.burn(1.0, 1.225, 60.0);
+        p.burn(1.0, SEA_LEVEL_AIR_DENSITY, 60.0);
         assert!(p.mass_properties.kg < full);
     }
 

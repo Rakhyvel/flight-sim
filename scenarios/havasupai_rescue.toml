@@ -1,0 +1,24 @@
+title = "Havasupai"
+description = """
+A group of four came up out of Havasu Canyon and is stuck on the plateau.
+Flat ground is scarce out here, so look hard.
+Bring them back to Grand Canyon Airport runway 03 in the Caravan."""
+region = "Grand Canyon"
+plane = "caravan"
+time_of_day = 12.0
+fuel_fraction = 0.4
+land = "KGCN 03"
+
+[start]
+kind = "runway"
+runway = "KGCN 21"
+
+[rescue]
+area = "Havasupai"
+lat = 36.20
+lon = -112.70
+search_radius_m = 4500
+clearing_length_m = 300
+num_hikers = 4
+kg_per_hiker = 75
+station = "cabin front"

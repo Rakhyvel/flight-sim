@@ -41,6 +41,9 @@ pub struct AirplaneConfig {
     /// Side force per rad of sideslip
     pub cy_beta: f64,
 
+    /// Takeoff ground roll at max weight at sea level [m]
+    pub field_length_m: f64,
+
     pub control_limits: ControlLimits,
     /// Stability derivatives (standard aero sign conventions)
     pub derivs: StabilityDerivatives,

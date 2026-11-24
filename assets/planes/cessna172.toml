@@ -18,6 +18,8 @@ max_thrust = 2600.0
 max_power = 119000.0  # 160 hp
 prop_efficiency = 0.8
 
+field_length_m = 300.0
+
 control_limits = { elevator = 25.0, aileron = 18.0, rudder = 16.0 }
 
 contacts = [

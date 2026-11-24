@@ -77,8 +77,8 @@ pub struct RescueSetup {
     pub lon: f64,
     #[serde(default = "default_search_radius")]
     pub search_radius_m: f64,
-    #[serde(default = "default_clearing_length")]
-    pub clearing_length_m: f64,
+    /// Length of flat strip to look for at sea level, longer up high [m]
+    pub clearing_length_m: Option<f64>,
     #[serde(default = "one_hiker")]
     pub num_hikers: u32,
     #[serde(default = "default_hiker_kg")]
@@ -89,10 +89,6 @@ pub struct RescueSetup {
 
 fn default_search_radius() -> f64 {
     4000.0
-}
-
-fn default_clearing_length() -> f64 {
-    300.0
 }
 
 fn one_hiker() -> u32 {

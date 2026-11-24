@@ -120,11 +120,14 @@ const BRIEFING_TIME: f64 = 10.0;
 //     - [ ] keep approaches clear of terrain
 // - [ ] missions/scenarios
 //     - [x] load from toml, title, have desc, region, ToD, plane load out, waypoints, and landing objectives
-//     - [ ] main menu that lists scenarios, using UI (move delta-horizon's UI to apricot?)
 //     - [ ] custom/free-flight mission editor
 //     - [ ] scenario shuffle
 //     - [ ] start mid-air at lat/lon/alt and velocity
 //     - [x] specific debrief titles
+// - [ ] main menu
+//     - [ ] main menu should use a blurry rendering of some Sight baked to an HDR as the background
+//     - [ ] move delta-horizon's UI to apricot and use that (replace notices with modals)
+//     - [ ] lists scenarios
 // - [ ] pause menu (split up sim clock vs app clock)
 // - [ ] ability to configure joysticks and key bindings
 // - [ ] cockpit camera? idrc about this ngl
@@ -363,6 +366,11 @@ impl FlightSim {
                 &mut rand::thread_rng(),
             )
             .unwrap_or_else(|e| panic!("{}: {e}", self.scenario_path));
+
+            let spot = rescue.spot();
+            let (lat, lon) = self.world.map.geo.to_lat_lon(spot.x, spot.z);
+            eprintln!("hikers at {lat:.4}, {lon:.4}");
+
             objectives.push(Box::new(rescue));
             sights.push(Waypoint {
                 name: setup.area.clone(),
