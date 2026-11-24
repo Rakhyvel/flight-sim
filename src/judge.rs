@@ -1,3 +1,10 @@
+//! His feet are light and nimble. He never sleeps. He says that he will never die. He dances in light and in
+//! shadow and he is a great favorite. He never sleeps, the judge. He is dancing, dancing. He says that he
+//! will never die.
+
+use apricot::camera::floating_origin::FloatingOrigin;
+use nalgebra_glm::{DVec3, Mat4, Vec3, Vec4};
+
 use crate::{
     airplane::Airplane,
     hud::{Mood, Notice},
@@ -6,7 +13,20 @@ use crate::{
 
 const FLY_AGAIN: &str = "R to fly again";
 
-/// How well one part of a landing went, best first
+pub struct Marker {
+    pub center: DVec3,
+    pub size: Vec3,
+    pub color: Vec4,
+}
+
+impl Marker {
+    // TODO: temp until we get real hiker models and stuff
+    pub fn model(&self, origin: &FloatingOrigin) -> Mat4 {
+        origin.transform(self.center, nalgebra_glm::scaling(&self.size))
+    }
+}
+
+/// How well a part of the flight went
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
 pub enum Grade {
     Butter,
@@ -63,10 +83,25 @@ impl DebriefRow {
 
 pub trait Objective {
     /// Watch `plane` through the last `dt` [s]
-    fn update(&mut self, plane: &Airplane, dt: f64);
+    fn update(&mut self, plane: &mut Airplane, dt: f64);
 
     /// How it's gone so far, for the debrief
     fn rows(&self) -> Vec<DebriefRow>;
+
+    /// Whether this objective is terminal
+    fn finished(&self) -> bool {
+        true
+    }
+
+    /// Something to tell the pilot right now
+    fn notice(&self) -> Option<Notice> {
+        None
+    }
+
+    /// The markers that this objective places in the world
+    fn markers(&self) -> Vec<Marker> {
+        Vec::new()
+    }
 }
 
 /// How a flight ended
@@ -76,9 +111,6 @@ pub enum Ending {
     Crashed(&'static str),
 }
 
-/// His feet are light and nimble. He never sleeps. He says that he will never die. He dances in light and in
-/// shadow and he is a great favorite. He never sleeps, the judge. He is dancing, dancing. He says that he
-/// will never die.
 pub struct Judge {
     landing: Landing,
     objectives: Vec<Box<dyn Objective>>,
@@ -92,7 +124,7 @@ impl Judge {
         }
     }
 
-    pub fn update(&mut self, plane: &Airplane, dt: f64) {
+    pub fn update(&mut self, plane: &mut Airplane, dt: f64) {
         if self.landing.ending().is_some() {
             return; // nothing counts after the flight is over...
         }
@@ -100,6 +132,19 @@ impl Judge {
         for objective in &mut self.objectives {
             objective.update(plane, dt);
         }
+
+        let all_finished = self.objectives.iter().all(|o| o.finished());
+        if matches!(self.landing.ending(), Some(Ending::Stopped)) && !all_finished {
+            self.landing.carry_on();
+        }
+    }
+
+    pub fn notice(&self) -> Option<Notice> {
+        self.objectives.iter().find_map(|o| o.notice())
+    }
+
+    pub fn markers(&self) -> Vec<Marker> {
+        self.objectives.iter().flat_map(|o| o.markers()).collect()
     }
 
     pub fn debrief(&self) -> Option<Notice> {

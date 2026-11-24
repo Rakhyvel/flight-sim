@@ -1,0 +1,25 @@
+title = "Lost near Sabino Canyon"
+description = """
+Two hikers are overdue near Sabino Canyon.
+They've laid out an orange signal panel somewhere flat.
+Find them, land beside it, and fly them to Tucson
+International runway 22."""
+region = "Tucson"
+plane = "cessna172"
+time_of_day = 16.5 # the light's going
+fuel_fraction = 0.5
+land = "KTUS 22"
+
+[start]
+kind = "runway"
+runway = "KRYN 06R"
+
+[rescue]
+area = "Sabino Canyon"
+lat = 32.315
+lon = -110.815
+search_radius_m = 4000
+clearing_length_m = 300
+num_hikers = 2
+kg_per_hiker = 75
+station = "rear seats"

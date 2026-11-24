@@ -21,10 +21,11 @@ use crate::{
     engine_sound::EngineSound,
     flight_data::FlightData,
     hud::Hud,
-    judge::Judge,
+    judge::{Judge, Objective},
     landing::Landing,
     minimap::Minimap,
     region::load_regions,
+    rescue::Rescue,
     scenario::{Scenario, Start},
     tour::Tour,
     units::{MS_PER_KT, M_PER_FT, M_PER_NM},
@@ -55,6 +56,7 @@ mod mass;
 mod minimap;
 mod plane_model;
 mod region;
+mod rescue;
 mod runway_model;
 mod scenario;
 mod terrain_color;
@@ -122,7 +124,7 @@ const BRIEFING_TIME: f64 = 10.0;
 //     - [ ] custom/free-flight mission editor
 //     - [ ] scenario shuffle
 //     - [ ] start mid-air at lat/lon/alt and velocity
-//     - [ ] specific debrief titles
+//     - [x] specific debrief titles
 // - [ ] pause menu (split up sim clock vs app clock)
 // - [ ] ability to configure joysticks and key bindings
 // - [ ] cockpit camera? idrc about this ngl
@@ -155,6 +157,7 @@ struct FlightSim {
     plane_mesh: MeshId,
     plane_trim_mesh: MeshId,
     plane_prop_mesh: MeshId,
+    cube_mesh: MeshId,
     prop_angle: f64, // [rad]
     prop_rps: f64,   // displayed revolutions per second
 
@@ -171,7 +174,7 @@ struct FlightSim {
     scenario: Scenario,
     /// Where `scenario` was read from, to read it again on restart
     scenario_path: String,
-    /// Grades the landing, from the first `start`
+    /// Grades the whole gosh darn flight
     judge: Option<Judge>,
     /// Time since the scenario started [s]
     clock: f64,
@@ -246,6 +249,7 @@ impl FlightSim {
             plane_mesh: renderer.add_mesh_data(plane_model.body, None),
             plane_trim_mesh: renderer.add_mesh_data(plane_model.trim, None),
             plane_prop_mesh: renderer.add_mesh_data(plane_model.prop, None),
+            cube_mesh: renderer.add_mesh_data(MeshData::cube(), None),
             atmosphere,
             prop_angle: 0.0,
             prop_rps: 0.0,
@@ -329,7 +333,7 @@ impl FlightSim {
 
         // Route to the runway, minus fixes already behind an airborne start
         let here = vec2(self.plane.pos.x, self.plane.pos.z);
-        let sights: Vec<Waypoint> = self
+        let mut sights: Vec<Waypoint> = self
             .scenario
             .sights
             .iter()
@@ -347,6 +351,27 @@ impl FlightSim {
                 .map(|(w, s)| (w.name.clone(), w.pos, s.radius_m)),
         );
 
+        let mut objectives: Vec<Box<dyn Objective>> = vec![Box::new(tour)];
+        if let Some(setup) = &self.scenario.rescue {
+            let area = self.world.map.geo.to_world(setup.lat, setup.lon);
+            let rescue = Rescue::new(
+                setup,
+                area,
+                &self.plane,
+                &self.scenario.land,
+                &|x, z| self.world.ground(x, z),
+                &mut rand::thread_rng(),
+            )
+            .unwrap_or_else(|e| panic!("{}: {e}", self.scenario_path));
+            objectives.push(Box::new(rescue));
+            sights.push(Waypoint {
+                name: setup.area.clone(),
+                pos: area,
+                altitude: None,
+                kind: WaypointKind::Landmark,
+            })
+        }
+
         // Route to the landing approach
         let out = |p: DVec2| (strip.threshold - p).dot(&strip.dir); // how far out along final [m]
         let joins = sights.last().map(|w| w.pos).or(airborne.then_some(here));
@@ -358,7 +383,7 @@ impl FlightSim {
         self.route = Route::new(sights.into_iter().chain(approach).collect());
 
         self.judge = Landing::new(&self.scenario.land, self.world.strips(), airborne)
-            .map(|landing| Judge::new(landing, vec![Box::new(tour)]));
+            .map(|landing| Judge::new(landing, objectives));
         self.clock = 0.0;
 
         // Ground around the new spot, all at once
@@ -381,7 +406,7 @@ impl Scene for FlightSim {
         }
         self.clock += dt;
         if let Some(judge) = &mut self.judge {
-            judge.update(&self.plane, dt);
+            judge.update(&mut self.plane, dt);
         }
 
         self.controls.update_input(&app.input, app.dt.as_secs_f32());
@@ -470,16 +495,26 @@ impl Scene for FlightSim {
             self.prop_angle as f32,
         );
 
+        let markers = self.judge.as_ref().map(Judge::markers).unwrap_or_default();
+
+        // render the shadows
         renderer.shadow_pass(&mut self.light, |pass| {
             pass.draw(self.plane_mesh, plane_model);
             pass.draw(self.plane_trim_mesh, plane_model);
             pass.draw(self.plane_prop_mesh, prop_model);
             self.world.draw_shadows(pass);
+            for m in &markers {
+                pass.draw(self.cube_mesh, m.model(&self.world.origin));
+            }
         });
 
         renderer.clear(vec4(0.6, 0.8, 0.95, 1.0));
 
         self.world.draw(renderer, self.plane.pos);
+
+        for m in &markers {
+            renderer.draw_mesh(self.cube_mesh, m.model(&self.world.origin), m.color);
+        }
 
         // Draw the water
         renderer
@@ -508,7 +543,7 @@ impl Scene for FlightSim {
         let notice = match self.judge.as_ref().and_then(Judge::debrief) {
             Some(debrief) => Some(debrief),
             None if self.clock < BRIEFING_TIME => Some(self.scenario.briefing()),
-            None => None,
+            None => self.judge.as_ref().and_then(Judge::notice),
         };
         self.hud
             .draw(renderer, &data, &self.minimap, app.fps, notice.as_ref());

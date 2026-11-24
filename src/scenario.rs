@@ -30,6 +30,7 @@ pub struct Scenario {
     /// Landmarks to fly past in order
     #[serde(default, rename = "sight")]
     pub sights: Vec<Sight>,
+    pub rescue: Option<RescueSetup>,
 }
 
 fn full_tanks() -> f64 {
@@ -67,6 +68,39 @@ pub struct Sight {
 
 fn default_sight_radius() -> f64 {
     800.0
+}
+
+#[derive(Deserialize)]
+pub struct RescueSetup {
+    pub area: String,
+    pub lat: f64,
+    pub lon: f64,
+    #[serde(default = "default_search_radius")]
+    pub search_radius_m: f64,
+    #[serde(default = "default_clearing_length")]
+    pub clearing_length_m: f64,
+    #[serde(default = "one_hiker")]
+    pub num_hikers: u32,
+    #[serde(default = "default_hiker_kg")]
+    pub kg_per_hiker: f64,
+    /// The plane's station they sit in
+    pub station: String,
+}
+
+fn default_search_radius() -> f64 {
+    4000.0
+}
+
+fn default_clearing_length() -> f64 {
+    300.0
+}
+
+fn one_hiker() -> u32 {
+    1
+}
+
+fn default_hiker_kg() -> f64 {
+    120.0 // just down right irresponsible
 }
 
 impl Scenario {

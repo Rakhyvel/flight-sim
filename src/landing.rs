@@ -61,7 +61,7 @@ pub struct Landing {
 }
 
 impl Landing {
-    /// Watch for a landing on `strip`, by a plane starting in the air or on the ground
+    /// Watch for a landing on `target`, by a plane starting in the air or on the ground
     pub fn new(target: &str, runways: Vec<(String, Strip)>, airborne: bool) -> Option<Self> {
         let target = runways.iter().position(|(name, _)| name == target)?;
         Some(Self {
@@ -112,11 +112,17 @@ impl Landing {
             .min_by(|(_, (_, a)), (_, (_, b))| off(a).total_cmp(&off(b)))
             .map(|(i, _)| i)
     }
+
+    pub fn carry_on(&mut self) {
+        if let Phase::Landed(..) = self.phase {
+            self.phase = Phase::Departing
+        }
+    }
 }
 
 impl Objective for Landing {
     /// Follow `plane` through the last `dt` [s]
-    fn update(&mut self, plane: &Airplane, dt: f64) {
+    fn update(&mut self, plane: &mut Airplane, dt: f64) {
         let contact = plane.contact();
         let here = vec2(plane.pos.x, plane.pos.z);
         let ground_speed = vec2(plane.vel.x, plane.vel.z).norm();

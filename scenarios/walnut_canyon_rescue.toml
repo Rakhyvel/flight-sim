@@ -1,0 +1,25 @@
+title = "Walnut Canyon"
+description = """
+Two hikers climbed out of Walnut Canyon on the wrong side
+and are waiting somewhere on the rim east of Flagstaff.
+Find their panel and bring them back to Flagstaff runway 21.
+It's 7,000 ft up here, so use all of the clearing."""
+region = "Grand Canyon"
+plane = "cessna172"
+time_of_day = 16.0
+fuel_fraction = 0.4
+land = "KFLG 21"
+
+[start]
+kind = "runway"
+runway = "KFLG 03"
+
+[rescue]
+area = "Walnut Canyon"
+lat = 35.17
+lon = -111.51
+search_radius_m = 5000
+clearing_length_m = 350
+num_hikers = 2
+kg_per_hiker = 75
+station = "rear seats"

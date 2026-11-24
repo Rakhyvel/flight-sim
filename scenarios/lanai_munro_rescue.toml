@@ -1,0 +1,24 @@
+title = "Munro Trail"
+description = """
+A hiker twisted an ankle on the Munro Trail, up on Lanai's ridge.
+Hop the channel from Kapalua in the Cub, find their panel,
+and bring them down to Lanai airport runway 21.
+The ridge sits right off the end of 21, so come in high and close."""
+region = "Maui"
+plane = "j3cub"
+time_of_day = 8.5
+land = "PHNY 21"
+
+[start]
+kind = "runway"
+runway = "PHJH 02"
+
+[rescue]
+area = "Munro Trail"
+lat = 20.81
+lon = -156.92
+search_radius_m = 5000
+clearing_length_m = 150
+num_hikers = 1
+kg_per_hiker = 75
+station = "front seat"

@@ -1,0 +1,23 @@
+title = "Borrego Badlands"
+description = """
+A hiker in the Anza-Borrego badlands is out of water.
+Off the dirt at Ocotillo Wells, find their panel
+before the afternoon heat sets in, and bring them back."""
+region = "SoCal"
+plane = "j3cub"
+time_of_day = 9.0
+land = "L90 13"
+
+[start]
+kind = "runway"
+runway = "L90 31"
+
+[rescue]
+area = "Anza-Borrego badlands"
+lat = 33.30
+lon = -116.20
+search_radius_m = 5000
+clearing_length_m = 150
+num_hikers = 1
+kg_per_hiker = 75
+station = "front seat"

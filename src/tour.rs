@@ -39,8 +39,8 @@ impl Tour {
 }
 
 impl Objective for Tour {
-    /// Note how close the plane at `plane_pos` is to each sight
-    fn update(&mut self, plane: &Airplane, _dt: f64) {
+    /// Note how close the plane is to each sight
+    fn update(&mut self, plane: &mut Airplane, _dt: f64) {
         let here = vec2(plane.pos.x, plane.pos.z);
         for s in &mut self.sights {
             s.closest = s.closest.min((s.pos - here).norm());

@@ -1,0 +1,25 @@
+title = "Moomomi Dunes"
+description = """
+Three campers at Moomomi on Molokai's north shore
+have a sick friend and no way out.
+Cross the channel from Kahului in the Otter, find their panel,
+and bring them to Molokai runway 05."""
+region = "Maui"
+plane = "twin_otter"
+time_of_day = 14.0
+fuel_fraction = 0.4
+land = "PHMK 05"
+
+[start]
+kind = "runway"
+runway = "PHOG 05"
+
+[rescue]
+area = "Moomomi Dunes"
+lat = 21.19
+lon = -157.20
+search_radius_m = 5000
+clearing_length_m = 300
+num_hikers = 3
+kg_per_hiker = 75
+station = "cabin front"

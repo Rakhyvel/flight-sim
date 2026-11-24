@@ -191,12 +191,3 @@ fn hat_direction(hat: HatState) -> (f64, f64) {
 fn key_axis(input: &Input, negative: Scancode, positive: Scancode) -> f64 {
     input.key_down(positive) as i32 as f64 - input.key_down(negative) as i32 as f64
 }
-
-fn wander(time: f64, seed: f64) -> f64 {
-    const FREQUENCIES: [f64; 3] = [0.23, 0.61, 1.37]; // [Hz] spread so they never line up into a visible loop
-    FREQUENCIES
-        .iter()
-        .map(|f| (TAU * f * time + seed * f * 7.0).sin())
-        .sum::<f64>()
-        / FREQUENCIES.len() as f64
-}

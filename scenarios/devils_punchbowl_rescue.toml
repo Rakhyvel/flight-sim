@@ -1,0 +1,24 @@
+title = "Devil's Punchbowl"
+description = """
+Two hikers from the Devil's Punchbowl got turned around
+and walked out onto the desert flats.
+Off Fox Field, find them, and bring them back to runway 24."""
+region = "SoCal"
+plane = "cessna172"
+time_of_day = 18.0
+fuel_fraction = 0.5
+land = "KWJF 24"
+
+[start]
+kind = "runway"
+runway = "KWJF 06"
+
+[rescue]
+area = "Devil's Punchbowl"
+lat = 34.47
+lon = -117.85
+search_radius_m = 4000
+clearing_length_m = 300
+num_hikers = 2
+kg_per_hiker = 75
+station = "rear seats"

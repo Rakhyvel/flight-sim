@@ -1,0 +1,23 @@
+title = "Point Reyes"
+description = """
+A birder wandered off the trail out on Point Reyes
+and the fog is coming in. Find them in the Cub
+and bring them back to Gnoss Field runway 13."""
+region = "NorCal"
+plane = "j3cub"
+time_of_day = 16.0
+land = "KDVO 13"
+
+[start]
+kind = "runway"
+runway = "KDVO 31"
+
+[rescue]
+area = "Point Reyes"
+lat = 38.05
+lon = -122.85
+search_radius_m = 5000
+clearing_length_m = 150
+num_hikers = 1
+kg_per_hiker = 75
+station = "front seat"

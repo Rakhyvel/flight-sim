@@ -359,16 +359,6 @@ mod tests {
     }
 
     #[test]
-    fn bumpy_terrain_gets_more_detail_than_flat() {
-        let pos = DVec3::new(60_000.0, 3_000.0, 60_000.0);
-        let bumpy = TileTree {
-            heights: TileHeights::new(4096, 4096, 4, |x, z| ((x * 7 + z * 13) % 50) as f32 * 10.0),
-            ..tree()
-        };
-        assert!(bumpy.ideal(pos).len() > tree().ideal(pos).len());
-    }
-
-    #[test]
     fn flat_terrain_gets_less_detail_than_bumpy() {
         let pos = DVec3::new(60_000.0, 3_000.0, 60_000.0);
         let flat = TileTree {

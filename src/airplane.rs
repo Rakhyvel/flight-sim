@@ -1,3 +1,5 @@
+// TODO: This is getting to be a lot in one file!
+
 use std::{collections::HashMap, f64::consts::FRAC_PI_2};
 
 use apricot::camera::floating_origin::FloatingOrigin;
@@ -145,10 +147,7 @@ impl Airplane {
     ) -> Result<(), String> {
         for (name, &kg) in station_loads {
             let i = self
-                .config
-                .stations
-                .iter()
-                .position(|s| &s.name == name) // already checked for uniqueness when loaded
+                .station(name)
                 .ok_or_else(|| format!("{} has no station {name}", self.config.name))?;
             self.station_load_masses[i] = kg;
         }
@@ -726,6 +725,20 @@ impl Airplane {
     /// How fast fuel is being burned [kg/s]
     pub fn fuel_flow(&self) -> f64 {
         self.fuel_flow
+    }
+
+    pub fn station(&self, name: &str) -> Option<usize> {
+        // already checked for uniqueness at load
+        self.config.stations.iter().position(|s| s.name == name)
+    }
+
+    pub fn add_station_load(&mut self, station: usize, kg: f64) {
+        self.station_load_masses[station] += kg;
+        self.mass_properties = PlaneMassProperties::new(
+            &self.config,
+            &self.fuel_tank_masses,
+            &self.station_load_masses,
+        )
     }
 }
 

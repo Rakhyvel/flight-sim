@@ -23,7 +23,7 @@ use crate::{
     region::Region,
     runway_model, terrain_color,
     tiles::{Tile, TileHeights, TileTree, TILE_QUADS},
-    units::M_PER_NM,
+    units::{M_PER_FT, M_PER_NM},
     waypoint::{Waypoint, WaypointKind},
 };
 
@@ -418,7 +418,7 @@ impl World {
     /// Generate a straight-in approach to a runway
     pub fn approach(&self, runway: &Runway) -> Vec<Waypoint> {
         const INITIAL_FIX_OUT: f64 = 10.0 * M_PER_NM;
-        const INITIAL_FIX_HEIGHT: f64 = 3000.0 * 0.3048;
+        const INITIAL_FIX_HEIGHT: f64 = 3000.0 * M_PER_FT;
         const FINAL_APPROACH_OUT: f64 = 5.0 * M_PER_NM;
         const THRESHOLD_CROSSING_HEIGHT: f64 = 15.0;
 

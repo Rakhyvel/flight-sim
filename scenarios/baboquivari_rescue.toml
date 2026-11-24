@@ -1,0 +1,24 @@
+title = "Baboquivari"
+description = """
+Two climbers are overdue off Baboquivari Peak.
+They've walked out into the Altar Valley and laid out a panel.
+Off Ryan Field, find them, and bring them back to runway 06R."""
+region = "Tucson"
+plane = "cessna172"
+time_of_day = 7.0
+fuel_fraction = 0.5
+land = "KRYN 06R"
+
+[start]
+kind = "runway"
+runway = "KRYN 24L"
+
+[rescue]
+area = "Baboquivari Peak"
+lat = 31.80
+lon = -111.55
+search_radius_m = 6000
+clearing_length_m = 300
+num_hikers = 2
+kg_per_hiker = 75
+station = "rear seats"
