@@ -1,9 +1,9 @@
 use nalgebra_glm::{vec2, DVec2, DVec3};
 
-use crate::landing::{DebriefRow, Grade};
-
-const FT_PER_M: f64 = 3.28084; // TODO: a units.rs?
-const M_PER_NM: f64 = 1852.0;
+use crate::{
+    landing::{DebriefRow, Grade},
+    units::{FT_PER_M, M_PER_NM},
+};
 
 struct Sighting {
     name: String,

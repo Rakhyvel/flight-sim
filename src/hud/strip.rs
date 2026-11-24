@@ -1,12 +1,11 @@
 use apricot::{geometry::rectangle::Rectangle, render::RenderContext};
 use nalgebra_glm::{vec2, Vec4};
 
-use super::{
-    widgets::thousands, ACCENT, DIM, FT_PER_M, KT_PER_MS, M_PER_NM, OUTLINE, STRIP, TEXT, WAYPOINT,
-};
+use super::{widgets::thousands, ACCENT, DIM, OUTLINE, STRIP, TEXT, WAYPOINT};
 use crate::{
     flight_data::FlightData,
     hud::{Theme, BAD},
+    units::{FT_PER_M, KT_PER_MS, M_PER_NM},
 };
 
 struct Cell {
@@ -70,7 +69,12 @@ pub fn draw(renderer: &RenderContext, t: &Theme, screen_w: f32, data: &FlightDat
 
 fn cells(data: &FlightData) -> Vec<Cell> {
     let mut cells = vec![
-        cell("GS kt", thousands(data.ground_speed * KT_PER_MS), TEXT, 3),
+        cell(
+            "GS kt",
+            thousands(data.ground_speed * KT_PER_MS as f32),
+            TEXT,
+            3,
+        ),
         cell("VS fpm", vertical_speed(data.vertical_speed), TEXT, 6),
         cell("RA ft", radar_altitude(data.height_above_ground), TEXT, 5),
         cell(
@@ -83,7 +87,12 @@ fn cells(data: &FlightData) -> Vec<Cell> {
     if let Some(nav) = &data.nav {
         cells.extend([
             cell("NEXT", nav.name.clone(), WAYPOINT, 11),
-            cell("DIS nm", format!("{:.1}", nav.distance / M_PER_NM), TEXT, 5),
+            cell(
+                "DIS nm",
+                format!("{:.1}", nav.distance / M_PER_NM as f32),
+                TEXT,
+                5,
+            ),
             cell(
                 "ETE",
                 nav.time_to_go.map_or("--:--".into(), minutes_seconds),
@@ -93,7 +102,7 @@ fn cells(data: &FlightData) -> Vec<Cell> {
             cell(
                 "TGT ft",
                 nav.target_altitude
-                    .map_or("---".into(), |a| thousands(a * FT_PER_M)),
+                    .map_or("---".into(), |a| thousands(a * FT_PER_M as f32)),
                 WAYPOINT,
                 6,
             ),
@@ -124,7 +133,7 @@ fn cells(data: &FlightData) -> Vec<Cell> {
 
 /// Rounded to 10 fpm so it doesn't flicker
 fn vertical_speed(ms: f32) -> String {
-    let fpm = (ms * FT_PER_M * 60.0 / 10.0).round() * 10.0;
+    let fpm = (ms * FT_PER_M as f32 * 60.0 / 10.0).round() * 10.0;
     if fpm > 0.0 {
         format!("+{}", thousands(fpm))
     } else {
@@ -134,7 +143,7 @@ fn vertical_speed(ms: f32) -> String {
 
 /// Like a real radar altimeter, only reads below 2,500 ft
 fn radar_altitude(m: f32) -> String {
-    let ft = m * FT_PER_M;
+    let ft = m * FT_PER_M as f32;
     if ft < 2500.0 {
         thousands(ft.max(0.0))
     } else {

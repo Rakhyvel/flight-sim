@@ -33,11 +33,6 @@ const HALO: Vec4 = Vec4::new(0.0, 0.0, 0.0, 0.8);
 const STRIP: Vec4 = Vec4::new(0.0, 0.0, 0.0, 0.75);
 const BAD: Vec4 = Vec4::new(1.0, 0.35, 0.3, 1.0);
 
-// Display units
-const FT_PER_M: f32 = 3.28084;
-const KT_PER_MS: f32 = 1.94384;
-const M_PER_NM: f32 = 1852.0;
-
 const LIGHT: &[u8] = include_bytes!("../../assets/fonts/IBMPlexMono-Light.ttf");
 const REGULAR: &[u8] = include_bytes!("../../assets/fonts/IBMPlexMono-Regular.ttf");
 

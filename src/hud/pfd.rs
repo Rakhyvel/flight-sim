@@ -3,9 +3,13 @@ use nalgebra_glm::{vec2, Vec2};
 
 use super::{
     widgets::{self, Tape},
-    Theme, ACCENT, DIM, FT_PER_M, GROUND, KT_PER_MS, OUTLINE, SKY, TEXT, WAYPOINT,
+    Theme, ACCENT, DIM, GROUND, OUTLINE, SKY, TEXT, WAYPOINT,
 };
-use crate::{flight_data::FlightData, hud::FPV};
+use crate::{
+    flight_data::FlightData,
+    hud::FPV,
+    units::{FT_PER_M, KT_PER_MS},
+};
 
 /// Half the attitude indicator's size [em]
 const R: f32 = 7.0;
@@ -46,7 +50,7 @@ pub fn draw(renderer: &RenderContext, t: &Theme, rect: Rectangle, data: &FlightD
     let mut x = rect.pos.x + t.pad;
 
     let speed = Tape {
-        value: data.airspeed * KT_PER_MS,
+        value: data.airspeed * KT_PER_MS as f32,
         px_per_unit: 0.15 * t.em, // about +-33 kt visible
         minor: 5.0,
         major: 20.0,
@@ -84,13 +88,15 @@ pub fn draw(renderer: &RenderContext, t: &Theme, rect: Rectangle, data: &FlightD
     x += 2.0 * l.r + t.gap;
 
     let altitude = Tape {
-        value: data.altitude * FT_PER_M,
+        value: data.altitude * FT_PER_M as f32,
         px_per_unit: 0.01 * t.em, // about +-500 ft visible
         minor: 100.0,
         major: 200.0,
         min: f32::NEG_INFINITY,
         ticks_on_right: false,
-        bug: nav.and_then(|n| n.target_altitude).map(|a| a * FT_PER_M),
+        bug: nav
+            .and_then(|n| n.target_altitude)
+            .map(|a| a * FT_PER_M as f32),
     };
     widgets::draw_tape(
         renderer,

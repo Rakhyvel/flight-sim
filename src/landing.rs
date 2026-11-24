@@ -5,6 +5,7 @@ use nalgebra_glm::{vec2, DVec2};
 use crate::{
     airplane::Airplane,
     hud::{Mood, Notice},
+    units::FT_PER_M,
     world::Strip,
 };
 
@@ -19,7 +20,6 @@ const CRASH_SINK: f64 = 4.5;
 /// Anything but a wheel hitting faster than this is a crash [m/s], slower is a scrape
 const CRASH_IMPACT: f64 = 2.0;
 
-const FT_PER_M: f64 = 3.28084;
 const AGAIN: &str = "R to fly again";
 
 // TODO: Common between landing and tour (and likely other objectives), doesn't belong here

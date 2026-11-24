@@ -26,6 +26,7 @@ use crate::{
     region::load_regions,
     scenario::{Scenario, Start},
     tour::Tour,
+    units::{MS_PER_KT, M_PER_FT, M_PER_NM},
     waypoint::{Route, Waypoint, WaypointKind},
     world::{World, RENDER_DISTANCE},
 };
@@ -47,6 +48,7 @@ mod engine_sound;
 mod flight_data;
 mod heightmap;
 mod hud;
+mod judge;
 mod landing;
 mod mass;
 mod minimap;
@@ -57,6 +59,7 @@ mod scenario;
 mod terrain_color;
 mod tiles;
 mod tour;
+mod units;
 mod waypoint;
 mod world;
 
@@ -273,9 +276,6 @@ impl FlightSim {
     /// Set everything up how the scenario starts. Reads the scenario and plane files again, so
     /// edits show up without relaunching, except the region, which needs a relaunch
     fn start(&mut self, renderer: &RenderContext) {
-        const M_PER_NM: f64 = 1852.0;
-        const M_PER_FT: f64 = 0.3048;
-        const MS_PER_KT: f64 = 0.514444;
         const APPROACH_THROTTLE: f32 = 0.4; // keeps a light plane on a 3 degree slope, roughly
 
         // Fresh scenario, sun, and plane
