@@ -26,7 +26,6 @@ use crate::{
     landing::Landing,
     menu::Menu,
     minimap::Minimap,
-    region::load_regions,
     rescue::Rescue,
     scenario::{Scenario, Start},
     tour::Tour,

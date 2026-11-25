@@ -8,6 +8,7 @@ pub struct RegionFile {
 #[derive(Deserialize)]
 pub struct Region {
     pub name: String,
+    pub title: String,
     pub tiff: String,
 }
 

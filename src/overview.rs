@@ -6,12 +6,16 @@ use std::{
 use apricot::render::{assets::TextureId, RenderContext};
 use image::{imageops, Rgba, RgbaImage};
 use nalgebra_glm::{vec2, vec3, Vec2, Vec3};
-use serde::{Deserialize, Serialize};
 
-use crate::heightmap::Heightmap;
+use crate::heightmap::{Bounds, Heightmap};
+
+/// Least ground a map shows across [m]
+const MIN_VIEW: f64 = 25_000.0;
+/// Room left around the route, as a fraction of its size
+const VIEW_MARGIN: f64 = 0.2;
 
 const CACHE_DIR: &str = "assets/cache";
-const OVERVIEW_WIDTH: f64 = 2048.0; // [px]
+const OVERVIEW_WIDTH: f64 = 1040.0; // [px]
 const BACKDROP_WIDTH: u32 = 384; // [px]
 const BACKDROP_BLUR: f32 = 6.0; // [px, gaussian sigma]
 /// How much steeper the hills get drawn so that they show up
@@ -22,29 +26,20 @@ const SEA: Vec3 = Vec3::new(0.16, 0.27, 0.38);
 const LOWLAND: Vec3 = Vec3::new(0.45, 0.50, 0.38);
 const HIGHLAND: Vec3 = Vec3::new(0.80, 0.74, 0.62);
 
-/// Where an overview's edges are
-#[derive(Serialize, Deserialize, Clone, Copy)]
-pub struct Corners {
-    pub north: f64, // [deg]
-    pub west: f64,  // [deg]
-    pub south: f64, // [deg]
-    pub east: f64,  // [deg]
-}
-
 pub struct Overview {
     pub texture: TextureId,
     pub size: Vec2, // [px]
     /// Blurred, for behind the menu
     pub backdrop: TextureId,
     pub backdrop_size: Vec2, // [px]
-    pub corners: Corners,
+    pub corners: Bounds,
 }
 
 impl Overview {
     /// The overview made for the region in `tiff`, if one's been made yet
     pub fn load(renderer: &RenderContext, tiff: &str) -> Option<Self> {
         let corners = std::fs::read_to_string(cache_path(tiff, ".toml")).ok()?;
-        let corners: Corners = toml::from_str(&corners).ok()?;
+        let corners: Bounds = toml::from_str(&corners).ok()?;
         let (texture, size) = load_texture(renderer, &cache_path(tiff, ".png"))?;
         let (backdrop, backdrop_size) = load_texture(renderer, &cache_path(tiff, "_backdrop.png"))?;
         Some(Self {
@@ -70,11 +65,6 @@ impl Overview {
         let c = &self.corners;
         self.size.y / ((c.north - c.south) * M_PER_DEG_LAT) as f32
     }
-}
-
-/// Whether the region in `tiff` has its overview yet
-pub fn exists(tiff: &str) -> bool {
-    cache_path(tiff, ".toml").exists() // written last, so the pictures are done too
 }
 
 /// Shade `map` into an overview, and save it, a blurred copy, and where its corners are
@@ -108,7 +98,7 @@ pub fn bake(map: &Heightmap, tiff: &str) -> Result<(), Box<dyn std::error::Error
 
     let (north, west) = map.geo.to_lat_lon(0.0, 0.0);
     let (south, east) = map.geo.to_lat_lon(ground_width, ground_depth);
-    let corners = Corners {
+    let corners = Bounds {
         north,
         west,
         south,
@@ -147,4 +137,40 @@ fn load_texture(renderer: &RenderContext, path: &Path) -> Option<(TextureId, Vec
 
 fn byte(c: f32) -> u8 {
     (c.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+pub fn bounds_around(points: impl Iterator<Item = (f64, f64)>, aspect: f64) -> Option<Bounds> {
+    let empty = Bounds {
+        north: -90.0,
+        west: 180.0,
+        south: 90.0,
+        east: -180.0,
+    };
+    let b = points.fold(empty, |b, (lat, lon)| Bounds {
+        north: b.north.max(lat),
+        west: b.west.min(lon),
+        south: b.south.min(lat),
+        east: b.east.max(lon),
+    });
+    if b.north < b.south {
+        return None;
+    }
+
+    let (mid_lat, mid_lon) = ((b.north + b.south) / 2.0, (b.east + b.west) / 2.0);
+    let m_per_deg_lon = M_PER_DEG_LAT * mid_lat.to_radians().cos();
+    let room = 1.0 + 2.0 * VIEW_MARGIN;
+    let mut tall = ((b.north - b.south) * M_PER_DEG_LAT * room).max(MIN_VIEW); // [m]
+    let mut wide = ((b.east - b.west) * m_per_deg_lon * room).max(MIN_VIEW); // [m]
+    if wide < tall * aspect {
+        wide = tall * aspect;
+    } else {
+        tall = wide / aspect;
+    }
+    let (half_lat, half_lon) = (tall / M_PER_DEG_LAT / 2.0, wide / m_per_deg_lon / 2.0);
+    Some(Bounds {
+        north: mid_lat + half_lat,
+        west: mid_lon - half_lon,
+        south: mid_lat - half_lat,
+        east: mid_lon + half_lon,
+    })
 }

@@ -1,12 +1,22 @@
 use apricot::terrain::{surface_height, surface_normal};
 use nalgebra_glm::{smoothstep, vec2, vec3, DVec2, Vec2, Vec3};
-use std::{fs::File, io::BufReader};
+use serde::{Deserialize, Serialize};
+use std::{error::Error, fs::File, io::BufReader};
 use tiff::{
     decoder::{Decoder, DecodingResult, Limits},
     tags::Tag,
 };
 
 pub const SEA_FLOOR: f32 = -30.0;
+
+// TODO: Isn't this basically the same as Corners in overview?
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct Bounds {
+    pub north: f64,
+    pub west: f64,
+    pub south: f64,
+    pub east: f64,
+}
 
 /// Where the map sits on earth. Sample (0, 0) is at world (0, 0), x runs east, z runs south.
 #[derive(Clone, Copy, Debug)]
@@ -23,6 +33,18 @@ pub struct GeoRef {
 }
 
 impl GeoRef {
+    fn new(lat0: f64, lon0: f64, dlon: f64, dlat: f64, depth: usize) -> Self {
+        let mid_lat = (lat0 - dlat * depth as f64 / 2.0).to_radians();
+        Self {
+            lat0,
+            lon0,
+            dlon,
+            dlat,
+            spacing_x: dlon * meters_per_deg_lon(mid_lat),
+            spacing_z: dlat * meters_per_deg_lat(mid_lat),
+        }
+    }
+
     /// World (x, z) [m] of a latitude and longitude [deg]
     pub fn to_world(&self, lat: f64, lon: f64) -> DVec2 {
         vec2(
@@ -66,82 +88,74 @@ pub struct Heightmap {
 
 impl Heightmap {
     /// Load elevation (in meters) from a GeoTIFF DEM
-    pub fn load_geotiff(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        const SCALE: f64 = 1.0;
-        let mut decoder =
-            Decoder::new(BufReader::new(File::open(path)?))?.with_limits(Limits::unlimited());
+    pub fn load_geotiff(path: &str) -> Result<Self, Box<dyn Error>> {
+        let (mut decoder, geo) = open_geotiff(path)?;
         let (width, depth) = decoder.dimensions()?;
-        let (width, depth) = (width as usize, depth as usize);
+        let heights = decoded_heights(decoder.read_image()?)?;
+        println!(
+            "Loaded {path}: {width}x{depth}, {:.1} x {:.1} m per sample",
+            geo.spacing_x, geo.spacing_z
+        );
+        Ok(Self::new(width as usize, depth as usize, heights, geo))
+    }
 
-        // The pixel size [sx, sy, sz]
-        let pixel_scale = decoder.get_tag_f64_vec(Tag::ModelPixelScaleTag)?;
-        // The tiepoint [i, j, k, x, y, z] that pins pixel (0, 0) to a map coordinate
-        let tiepoint = decoder.get_tag_f64_vec(Tag::ModelTiepointTag)?;
+    /// Load just the part of a GeoTIFF DEM inside `bounds`, reading only the tiles under it.
+    /// Anything past the file's edge is sea
+    pub fn load_geotiff_window(path: &str, bounds: &Bounds) -> Result<Self, Box<dyn Error>> {
+        let (mut decoder, file_geo) = open_geotiff(path)?;
+        let (file_width, file_depth) = decoder.dimensions()?;
 
-        let raw: Vec<f32> = match decoder.read_image()? {
-            DecodingResult::F32(v) => v,
-            DecodingResult::F64(v) => v.into_iter().map(|h| h as f32).collect(),
-            DecodingResult::I16(v) => v.into_iter().map(f32::from).collect(),
-            DecodingResult::U16(v) => v.into_iter().map(f32::from).collect(),
-            DecodingResult::I32(v) => v.into_iter().map(|h| h as f32).collect(),
-            _ => return Err("unsupported DEM sample type".into()),
+        // The samples it covers, which can run off the file
+        let x0 = ((bounds.west - file_geo.lon0) / file_geo.dlon).floor() as i64;
+        let z0 = ((file_geo.lat0 - bounds.north) / file_geo.dlat).floor() as i64;
+        let width = ((bounds.east - bounds.west) / file_geo.dlon).ceil() as usize;
+        let depth = ((bounds.north - bounds.south) / file_geo.dlat).ceil() as usize;
+        let mut heights = vec![SEA_FLOOR; width * depth];
+
+        // Copy in the tiles under it
+        let (tile_w, tile_d) = decoder.chunk_dimensions(); // strips are just full-width tiles
+        let (tile_w, tile_d) = (tile_w as i64, tile_d as i64);
+        let tiles_across = (file_width as i64 + tile_w - 1) / tile_w;
+        let tiles_down = (file_depth as i64 + tile_d - 1) / tile_d;
+        let tiles_under = |start: i64, len: usize, tile: i64, tiles: i64| {
+            start.div_euclid(tile).max(0)
+                ..(start + len as i64 + tile - 1).div_euclid(tile).min(tiles)
         };
-
-        // The ocean is "no data", usually a huge negative number or NaN. Make it sea level
-        let heights: Vec<f32> = raw
-            .into_iter()
-            .map(|h| {
-                if h.is_finite() && h > 0.0 {
-                    h * SCALE as f32
-                } else {
-                    SEA_FLOOR
+        for ty in tiles_under(z0, depth, tile_d, tiles_down) {
+            for tx in tiles_under(x0, width, tile_w, tiles_across) {
+                let index = (ty * tiles_across + tx) as u32;
+                let tile_width = decoder.chunk_data_dimensions(index).0 as i64; // edge tiles are clipped
+                let tile = decoded_heights(decoder.read_chunk(index)?)?;
+                for (i, h) in tile.into_iter().enumerate() {
+                    let x = tx * tile_w + i as i64 % tile_width - x0;
+                    let z = ty * tile_d + i as i64 / tile_width - z0;
+                    if (0..width as i64).contains(&x) && (0..depth as i64).contains(&z) {
+                        heights[x as usize + z as usize * width] = h;
+                    }
                 }
-            })
-            .collect();
-
-        let max_height = heights.iter().copied().fold(0.0_f32, f32::max);
-
-        let geokeys = decoder.get_tag_u16_vec(Tag::GeoKeyDirectoryTag)?;
-        let geo_key = |key: u16| {
-            geokeys[4..]
-                .chunks_exact(4)
-                .find(|e| e[0] == key && e[1] == 0) // location 0 is the value
-                .map(|e| e[3])
-        };
-        if geo_key(1024) != Some(2) {
-            // Gotta be type 2 babey (geographic lat/long)
-            return Err("only lat/long GeoTIFFs are supported".into());
+            }
         }
 
-        let half = if geo_key(1025) == Some(2) { 0.0 } else { 0.5 };
+        let geo = GeoRef::new(
+            file_geo.lat0 - z0 as f64 * file_geo.dlat,
+            file_geo.lon0 + x0 as f64 * file_geo.dlon,
+            file_geo.dlon,
+            file_geo.dlat,
+            depth,
+        );
+        Ok(Self::new(width, depth, heights, geo))
+    }
 
-        let (dlon, dlat) = (pixel_scale[0], pixel_scale[1]);
-        // The tiepoint pins pixel (tiepoint[0], tiepoint[1]) to (lon, lat). Move that to the center of sample (0, 0)
-        let lon0 = tiepoint[3] + (half - tiepoint[0]) * dlon;
-        let lat0 = tiepoint[4] - (half - tiepoint[1]) * dlat;
-
-        let mid_lat = (lat0 - dlat * depth as f64 / 2.0).to_radians();
-        let geo = GeoRef {
-            lat0,
-            lon0,
-            dlon,
-            dlat,
-            spacing_x: dlon * meters_per_deg_lon(mid_lat),
-            spacing_z: dlat * meters_per_deg_lat(mid_lat),
-        };
-
-        let (spacing_x, spacing_z) = (geo.spacing_x as f32, geo.spacing_z as f32);
-
-        println!("Loaded {path}: {width}x{depth}, {spacing_x:.1} x {spacing_z:.1} m per sample");
-        Ok(Self {
+    fn new(width: usize, depth: usize, heights: Vec<f32>, geo: GeoRef) -> Self {
+        Self {
             width,
             depth,
+            max_height: heights.iter().copied().fold(0.0_f32, f32::max),
             heights,
-            spacing_x,
-            spacing_z,
-            max_height,
+            spacing_x: geo.spacing_x as f32,
+            spacing_z: geo.spacing_z as f32,
             geo,
-        })
+        }
     }
 
     /// Height at sample (x, z). Off the edge is sea level
@@ -249,6 +263,63 @@ impl Heightmap {
         let max_z = (self.depth - 1) as f64 * self.geo.spacing_z;
         p.x >= inset && p.y >= inset && p.x <= max_x - inset && p.y <= max_z - inset
     }
+}
+
+fn open_geotiff(path: &str) -> Result<(Decoder<BufReader<File>>, GeoRef), Box<dyn Error>> {
+    let mut decoder =
+        Decoder::new(BufReader::new(File::open(path)?))?.with_limits(Limits::unlimited());
+    let (width, depth) = decoder.dimensions()?;
+    let (_, depth) = (width as usize, depth as usize);
+
+    // The pixel size [sx, sy, sz]
+    let pixel_scale = decoder.get_tag_f64_vec(Tag::ModelPixelScaleTag)?;
+    // The tiepoint [i, j, k, x, y, z] that pins pixel (0, 0) to a map coordinate
+    let tiepoint = decoder.get_tag_f64_vec(Tag::ModelTiepointTag)?;
+
+    let geokeys = decoder.get_tag_u16_vec(Tag::GeoKeyDirectoryTag)?;
+    let geo_key = |key: u16| {
+        geokeys[4..]
+            .chunks_exact(4)
+            .find(|e| e[0] == key && e[1] == 0) // location 0 is the value
+            .map(|e| e[3])
+    };
+    if geo_key(1024) != Some(2) {
+        // Gotta be type 2 babey (geographic lat/long)
+        return Err("only lat/long GeoTIFFs are supported".into());
+    }
+
+    let half = if geo_key(1025) == Some(2) { 0.0 } else { 0.5 };
+
+    let (dlon, dlat) = (pixel_scale[0], pixel_scale[1]);
+    // The tiepoint pins pixel (tiepoint[0], tiepoint[1]) to (lon, lat). Move that to the center of sample (0, 0)
+    let lon0 = tiepoint[3] + (half - tiepoint[0]) * dlon;
+    let lat0 = tiepoint[4] - (half - tiepoint[1]) * dlat;
+
+    let geo = GeoRef::new(lat0, lon0, pixel_scale[0], pixel_scale[1], depth as usize);
+    Ok((decoder, geo))
+}
+
+fn decoded_heights(samples: DecodingResult) -> Result<Vec<f32>, Box<dyn Error>> {
+    let raw: Vec<f32> = match samples {
+        DecodingResult::F32(v) => v,
+        DecodingResult::F64(v) => v.into_iter().map(|h| h as f32).collect(),
+        DecodingResult::I16(v) => v.into_iter().map(f32::from).collect(),
+        DecodingResult::U16(v) => v.into_iter().map(f32::from).collect(),
+        DecodingResult::I32(v) => v.into_iter().map(|h| h as f32).collect(),
+        _ => return Err("unsupported DEM sample type".into()),
+    };
+
+    // The ocean is "no data", usually a huge negative number or NaN. Make it sea level
+    Ok(raw
+        .into_iter()
+        .map(|h| {
+            if h.is_finite() && h > 0.0 {
+                h
+            } else {
+                SEA_FLOOR
+            }
+        })
+        .collect())
 }
 
 #[cfg(test)]

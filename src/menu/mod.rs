@@ -25,9 +25,9 @@ use sdl2::ttf::FontStyle;
 use crate::{
     airport::{load_runways, Runway},
     config::AirplaneConfig,
-    heightmap::Heightmap,
+    heightmap::{Bounds, Heightmap},
     hud::{LIGHT, REGULAR},
-    overview::{self, Overview},
+    overview::{self, bounds_around, Overview},
     region::{load_regions, Region},
     scenario::{list_scenarios, Scenario, Start},
     FlightSim,
@@ -35,12 +35,14 @@ use crate::{
 use route_map::{Route, RouteMap, Stop};
 
 const SCENARIO_DIR: &str = "scenarios";
-const LIST_SIZE: Vec2 = Vec2::new(380.0, 660.0); // [px]
+const LIST_SIZE: Vec2 = Vec2::new(380.0, 620.0); // [px]
 const ENTRY_SIZE: Vec2 = Vec2::new(364.0, 32.0); // [px]
 const DETAILS_WIDTH: f32 = 520.0; // [px]
 const MAP_SIZE: Vec2 = Vec2::new(520.0, 220.0); // [px]
 /// How bright the blurred map behind the menu is drawn
-const BACKDROP_TINT: Vec4 = Vec4::new(0.5, 0.5, 0.55, 1.0);
+const BACKDROP_TINT: Vec4 = Vec4::new(0.95, 0.95, 0.955, 1.0);
+
+const BRIEF_SIZE: Vec2 = Vec2::new(520.0, 330.0);
 
 #[derive(Clone)]
 enum Msg {
@@ -78,14 +80,18 @@ pub struct Menu {
     /// What each plane file calls its plane
     plane_names: HashMap<String, String>,
     runways: HashMap<String, Runway>,
-    /// Each region's overview, by tiff, once it's been loaded
+    /// Each region's overview
     overviews: HashMap<String, Rc<Overview>>,
     selected: Option<usize>,
     loading: Option<Loading>,
-    flying: bool,
 
-    // What the widgets show
-    entry_selected: Vec<Rc<Cell<bool>>>,
+    /// Maps being drawn on other threads, by scenario files
+    drawing: HashMap<String, JoinHandle<Result<(), String>>>,
+    /// Scenario files to why they couldn't be mapped
+    unmappable: HashMap<String, String>,
+    entry_looks: Vec<Rc<Cell<ButtonLook>>>,
+    map_note: Text,
+
     title: Text,
     details: Text,
     description: Text,
@@ -126,13 +132,13 @@ impl Menu {
             .into_iter()
             .map(|r| (r.name.clone(), r))
             .collect();
+        let entry_looks = scenarios
+            .iter()
+            .map(|_| Rc::new(Cell::new(ButtonLook::normal(&STYLE))))
+            .collect();
 
         let mut menu = Self {
             ui: Layers::new(),
-            entry_selected: scenarios
-                .iter()
-                .map(|_| Rc::new(Cell::new(false)))
-                .collect(),
             scenarios,
             regions,
             plane_names,
@@ -140,7 +146,10 @@ impl Menu {
             overviews: HashMap::new(),
             selected: None,
             loading: None,
-            flying: false,
+            entry_looks,
+            drawing: HashMap::new(),
+            unmappable: HashMap::new(),
+            map_note: text(""),
             title: text("Pick a flight"),
             details: text(""),
             description: text(""),
@@ -189,18 +198,37 @@ impl Menu {
             .border(STYLE.border_subtle, 1.0);
 
         // The picked one
+        let wrap_width = DETAILS_WIDTH - 16.0; // room for the scroll bar
+        let brief = container![
+            Label::new(self.title.clone(), heading, r).wrap(wrap_width, r),
+            Label::new(self.details.clone(), body, r)
+                .color(STYLE.accent_bright)
+                .wrap(wrap_width, r),
+            Rule::horizontal(wrap_width).color(STYLE.border_subtle),
+            Label::new(self.description.clone(), body, r)
+                .color(STYLE.text_secondary)
+                .wrap(wrap_width, r),
+            Label::new(self.objectives.clone(), body, r).wrap(wrap_width, r),
+        ]
+        .padding(Vec2::zeros())
+        .gap(14.0);
+        let fly = Button::fit("Fly", heading, r, vec2(28.0, 8.0))
+            .look(ButtonLook::accented(&STYLE))
+            .active(self.can_fly.clone())
+            .on_click(Msg::Fly);
         let details = container![
-            Label::new(self.title.clone(), heading, r),
-            Label::new(self.details.clone(), body, r).color(STYLE.accent_bright),
-            Rule::horizontal(DETAILS_WIDTH).color(STYLE.border_subtle),
-            Label::new(self.description.clone(), body, r).color(STYLE.text_secondary),
-            Label::new(self.objectives.clone(), body, r),
-            RouteMap::new(MAP_SIZE, self.route.clone(), body),
-            Button::fit("Fly", heading, r, vec2(28.0, 8.0))
-                .look(ButtonLook::accented(&STYLE))
-                .active(self.can_fly.clone())
-                .on_click(Msg::Fly),
-            Label::new(self.status.clone(), body, r).color(self.status_color.clone()),
+            ScrollContainer::new(BRIEF_SIZE, brief),
+            RouteMap::new(MAP_SIZE, self.route.clone(), self.map_note.clone(), body),
+            container![
+                fly,
+                Label::new(self.status.clone(), body, r)
+                    .color(self.status_color.clone())
+                    .wrap(DETAILS_WIDTH - 140.0, r),
+            ]
+            .flow(Flow::Horizontal)
+            .cross_align(Align::Center)
+            .padding(Vec2::zeros())
+            .gap(16.0),
         ]
         .padding(Vec2::zeros())
         .fixed_width(DETAILS_WIDTH)
@@ -243,8 +271,12 @@ impl Menu {
     /// Set the selected scenario
     fn select(&mut self, renderer: &RenderContext, i: usize) {
         self.selected = Some(i);
-        for (j, selected) in self.entry_selected.iter().enumerate() {
-            selected.set(j == i);
+        for (j, look) in self.entry_looks.iter().enumerate() {
+            look.set(if j == i {
+                ButtonLook::accented(&STYLE)
+            } else {
+                ButtonLook::normal(&STYLE)
+            });
         }
 
         let (path, scenario) = &self.scenarios[i];
@@ -261,7 +293,7 @@ impl Menu {
 
         // Setup the full description
         let region = self.regions.get(&s.region);
-        let region_title = region.map_or(s.region.as_str(), |r| r.name.as_str());
+        let region_title = region.map_or(s.region.as_str(), |r| r.title.as_str());
         let plane = self
             .plane_names
             .get(&s.plane)
@@ -278,11 +310,28 @@ impl Menu {
             .collect::<Vec<_>>()
             .join("\n");
 
-        let overview = region.and_then(|r| overview_for(&mut self.overviews, renderer, &r.tiff));
-        *self.route.borrow_mut() = overview.map(|overview| Route {
-            overview,
-            stops: stops(s, &self.runways),
-        });
+        // Start drawing the map if there isn't one yet
+        let stops = stops(s, &self.runways);
+        let overview = overview_for(&mut self.overviews, renderer, path);
+        let should_draw = overview.is_none()
+            && !self.drawing.contains_key(path)
+            && !self.unmappable.contains_key(path);
+        let bounds = bounds_around(
+            stops.iter().map(|(lat, lon, _)| (*lat, *lon)),
+            (MAP_SIZE.x / MAP_SIZE.y) as f64,
+        );
+        if let (true, Some(region), Some(bounds)) = (should_draw, region, bounds) {
+            let (tiff, scenario) = (region.tiff.clone(), path.clone());
+            let thread = std::thread::spawn(move || draw_map(&tiff, &scenario, &bounds));
+            self.drawing.insert(path.clone(), thread);
+        }
+        *self.map_note.borrow_mut() = match self.unmappable.get(path) {
+            Some(why) => why.clone(),
+            None if self.drawing.contains_key(path) => "Drawing the map...".to_string(),
+            None => "No map".to_string(),
+        };
+        *self.route.borrow_mut() = overview.map(|overview| Route { overview, stops });
+
         self.can_fly.set(true);
         self.show_status("", STYLE.text_secondary);
     }
@@ -322,7 +371,6 @@ impl Menu {
                 self.loading_shown.set(false);
                 match FlightSim::new(app, &path, map) {
                     Ok(sim) => {
-                        self.flying = true;
                         return SceneCommand::push(sim);
                     }
                     Err(e) => self.fail(format!("{path}: {e}")),
@@ -359,9 +407,23 @@ impl Scene for Menu {
             return command;
         }
 
-        // Back from a flight
-        if std::mem::take(&mut self.flying) {
-            if let Some(i) = self.selected {
+        // Maps that have finished drawing
+        let finished: Vec<String> = self
+            .drawing
+            .iter()
+            .filter(|(_, thread)| thread.is_finished())
+            .map(|(path, _)| path.clone())
+            .collect();
+        for path in finished {
+            let drawn = self.drawing.remove(&path).map(|thread| {
+                thread
+                    .join()
+                    .unwrap_or_else(|_| Err("drawing it panicked".to_string()))
+            });
+            if let Some(Err(why)) = drawn {
+                self.unmappable.insert(path.clone(), why);
+            }
+            if let Some(i) = self.selected.filter(|&i| self.scenarios[i].0 == path) {
                 self.select(&app.renderer, i);
             }
         }
@@ -393,15 +455,15 @@ impl Scene for Menu {
     }
 }
 
-/// Read a region's terrain, and make its overview if it doesn't have one yet
 fn read_terrain(tiff: &str) -> Result<Heightmap, String> {
-    let map = Heightmap::load_geotiff(&format!("assets/{tiff}")).map_err(|e| e.to_string())?;
-    if !overview::exists(tiff) {
-        if let Err(e) = overview::bake(&map, tiff) {
-            eprintln!("couldn't make the {tiff} overview: {e}");
-        }
-    }
-    Ok(map)
+    Heightmap::load_geotiff(&format!("assets/{tiff}")).map_err(|e| e.to_string())
+}
+
+/// Read just the ground under `bounds`, and bake `scenario`'s map from it
+fn draw_map(tiff: &str, scenario: &str, bounds: &Bounds) -> Result<(), String> {
+    let map = Heightmap::load_geotiff_window(&format!("assets/{tiff}"), bounds)
+        .map_err(|e| e.to_string())?;
+    overview::bake(&map, scenario).map_err(|e| e.to_string())
 }
 
 /// The overview for `tiff`, loading it the first time it's asked for
@@ -456,7 +518,7 @@ fn out_on_final(runway: &Runway, distance_nm: f64) -> (f64, f64) {
     let lon_per_lat = lat.to_radians().cos(); // a degree of longitude is this many degrees of latitude long
     let north = runway.start.0 - runway.end.0;
     let east = (runway.start.1 - runway.end.1) * lon_per_lat;
-    let back = distance_nm / 60.0 / north.hypot(east); // a nautical mile is a minute of latitude
+    let back = distance_nm / 60.0 / north.hypot(east); // TIL a nautical mile is a minute of latitude
     (lat + north * back, lon + east * back / lon_per_lat)
 }
 

@@ -20,7 +20,6 @@ use nalgebra_glm::{vec2, vec3, vec4, DVec2, DVec3, Mat4, Vec3, Vec4};
 use crate::{
     airport::{self, Airport, Navaid, Runway},
     heightmap::Heightmap,
-    region::Region,
     runway_model, terrain_color,
     tiles::{Tile, TileHeights, TileTree, TILE_QUADS},
     units::{M_PER_FT, M_PER_NM},
