@@ -132,7 +132,7 @@ impl GroundEffect {
     /// The ground effect at some height for a config
     fn at(height: f64, config: &AirplaneConfig) -> Self {
         let aspect_ratio = config.wingspan * config.wingspan / config.wing_area;
-        // wieselberger, which should be better than mccormick for high-wings
+        // wieselsberger, which should be better than mccormick for high-wings
         let height_per_span = (height / config.wingspan).clamp(0.0, 1.0);
         let induced_drag_cut =
             ((1.0 - 1.32 * height_per_span) / (1.05 + 7.4 * height_per_span)).max(0.0);

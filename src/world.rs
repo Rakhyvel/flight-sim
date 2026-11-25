@@ -86,10 +86,7 @@ pub struct World {
 }
 
 impl World {
-    pub fn load(renderer: &RenderContext, region: &Region) -> Result<Self, Box<dyn Error>> {
-        // Load the map
-        let mut map = Heightmap::load_geotiff(&format!("assets/{}", region.tiff))?;
-
+    pub fn new(renderer: &RenderContext, mut map: Heightmap) -> Result<Self, Box<dyn Error>> {
         // Load the tiles
         let (w, d) = map.size();
         let tree = TileTree {
@@ -179,6 +176,19 @@ impl World {
             drawn: ModelSet::new(),
             origin: FloatingOrigin::default(),
         })
+    }
+
+    /// Unload all the stuff on the GPU
+    pub fn unload(&mut self, renderer: &RenderContext) {
+        for (_, asphalt, marks) in self.runway_meshes.drain(..) {
+            renderer.unload_mesh(asphalt);
+            renderer.unload_mesh(marks);
+        }
+        for (_, built_tile) in self.tiles.drain() {
+            renderer.unload_mesh(built_tile.model.mesh);
+            renderer.unload_texture(built_tile.model.texture);
+            renderer.unload_texture(built_tile.normals);
+        }
     }
 
     /// Height and normal of the ground at world (x, z)

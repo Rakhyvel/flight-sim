@@ -101,14 +101,19 @@ fn default_hiker_kg() -> f64 {
 
 impl Scenario {
     /// Read a scenario file
+    pub fn try_load(path: &str) -> Result<Self, String> {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+        toml::from_str(&text).map_err(|e| format!("{path}: {e}"))
+    }
+
+    /// Read a scenario file or die trying
     pub fn load(path: &str) -> Self {
-        let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
-        toml::from_str(&text).unwrap_or_else(|e| panic!("{path}: {e}"))
+        Self::try_load(path).unwrap_or_else(|e| panic!("{e}"))
     }
 
     /// The plane to fly, fresh from its file
     pub fn plane_config(&self) -> AirplaneConfig {
-        let path = format!("assets/planes/{}.toml", self.plane);
+        let path = self.plane_path();
         AirplaneConfig::load(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
     }
 
@@ -134,6 +139,71 @@ impl Scenario {
                 .lines()
                 .map(|line| (line.to_string(), Mood::Plain))
                 .collect(),
+        }
+    }
+
+    pub fn plane_path(&self) -> String {
+        format!("assets/planes/{}.toml", self.plane)
+    }
+
+    pub fn objectives(&self) -> Vec<String> {
+        let start = match &self.start {
+            Start::Runway { runway } => format!("Take off from {runway}"),
+            Start::Final {
+                distance_nm,
+                height_ft,
+                speed_kt,
+            } => format!(
+                "Start {distance_nm}nm out on final, {height_ft:.0}' up at {speed_kt:.0} kt"
+            ),
+        };
+        let sights = self.sights.iter().map(|s| match s.altitude_ft {
+            Some(ft) => format!("Fly past {} at {ft:.0}'", s.name),
+            None => format!("Fly past {}", s.name),
+        });
+        let rescue = self.rescue.iter().map(|r| match r.num_hikers {
+            1 => format!("Find the hiker near {} and pick them up", r.area),
+            n => format!("Find the {n} hikers near {} and pick them up", r.area),
+        });
+        std::iter::once(start)
+            .chain(sights)
+            .chain(rescue)
+            .chain([format!("Land on {}", self.land)])
+            .collect()
+    }
+}
+
+pub fn list_scenarios(dir: &str) -> Vec<(String, Result<Scenario, String>)> {
+    let mut paths: Vec<String> = std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .filter_map(|entry| entry.ok())
+                .map(|entry| entry.path())
+                .filter(|path| path.extension().is_some_and(|ext| ext == "toml"))
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    paths.sort();
+    paths
+        .into_iter()
+        .map(|path| {
+            let scenario = Scenario::try_load(&path);
+            (path, scenario)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn every_scenario_file_reads() {
+        for (_, scenario) in list_scenarios("scenarios") {
+            match scenario {
+                Ok(s) => drop(s.plane_config()), // panics if the plane file is broken
+                Err(e) => panic!("{e}"),
+            }
         }
     }
 }

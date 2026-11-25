@@ -3,15 +3,15 @@ name = "Maui"
 tiff = "maui.tif"
 
 [[regions]]
-name = "Denver"
+name = "Front Range"
 tiff = "denver.tif"
 
 [[regions]]
-name = "Seattle"
+name = "Pacific Northwest"
 tiff = "seattle.tif"
 
 [[regions]]
-name = "Tucson"     # and phoenix too I guess...
+name = "Southern Arizona" # and phoenix too I guess...
 tiff = "tucson.tif"
 
 [[regions]]
@@ -19,9 +19,9 @@ name = "Grand Canyon"
 tiff = "grand_canyon.tif"
 
 [[regions]]
-name = "SoCal"
+name = "Southern California"
 tiff = "socal.tif"
 
 [[regions]]
-name = "NorCal"
+name = "Northern California"
 tiff = "norcal.tif"

@@ -20,9 +20,11 @@ use crate::{
     control::Controls,
     engine_sound::EngineSound,
     flight_data::FlightData,
+    heightmap::Heightmap,
     hud::Hud,
     judge::{Judge, Objective},
     landing::Landing,
+    menu::Menu,
     minimap::Minimap,
     region::load_regions,
     rescue::Rescue,
@@ -53,7 +55,9 @@ mod hud;
 mod judge;
 mod landing;
 mod mass;
+mod menu;
 mod minimap;
+mod overview;
 mod plane_model;
 mod region;
 mod rescue;
@@ -68,14 +72,12 @@ mod world;
 
 const LOADS_PER_FRAME: usize = 1;
 
-/// Flown when no scenario file is given on the command line
-const DEFAULT_SCENARIO: &str = "scenarios/kahului_final.toml";
 /// How long the briefing stays up [s]
 const BRIEFING_TIME: f64 = 10.0;
 
 // todo:
 // - [x] good aero model
-//     - [x] wieselberger ground effect w/ elevator downwash
+//     - [x] wieselsberger ground effect w/ elevator downwash
 //     - [ ] engine torque and P-factor
 // - [x] joystick
 // - [x] better plane model
@@ -142,9 +144,10 @@ fn main() -> Result<(), Error> {
         AppConfig {
             title: "Flight Sim",
             window_size: I32Vec2::new(1536, 864),
+            escape_quits: false,
             ..Default::default()
         },
-        FlightSim::new,
+        |app| Menu::new(app, std::env::args().nth(1)),
     )
 }
 
@@ -187,7 +190,7 @@ struct FlightSim {
 }
 
 impl FlightSim {
-    fn new(app: &App) -> Result<Self, Error> {
+    fn new(app: &App, scenario_path: &str, map: Heightmap) -> Result<Self, Error> {
         let renderer = &app.renderer;
 
         // Replace the default 3d shader with our super cool epic shader
@@ -233,21 +236,14 @@ impl FlightSim {
         }
 
         // The scenario decides where, when, and in what
-        let scenario_path = std::env::args()
-            .nth(1)
-            .unwrap_or_else(|| DEFAULT_SCENARIO.to_string());
+        let scenario_path = scenario_path.to_string();
         let scenario = Scenario::load(&scenario_path);
 
         let mut light = DirectionalLight::new(scenario.sun_direction(), 2048)?;
         light.frustum.shadow_distance = 150.0;
         app.renderer.set_light(Some(&light));
 
-        let regions = load_regions("assets/regions.toml");
-        let region = regions
-            .iter()
-            .find(|r| r.name == scenario.region)
-            .unwrap_or_else(|| panic!("no region {}", scenario.region));
-        let world = World::load(renderer, region).expect("couldnt load region");
+        let world = World::new(renderer, map).expect("couldnt build world");
 
         let plane_model = plane_model::airplane_model();
         let mut sim = Self {
@@ -401,10 +397,29 @@ impl FlightSim {
         self.world.recenter(self.plane.pos);
         self.world.update(renderer, self.plane.pos, usize::MAX);
     }
+
+    fn unload(&mut self, renderer: &RenderContext) {
+        self.world.unload(renderer);
+        for mesh in [
+            self.plane_mesh,
+            self.plane_trim_mesh,
+            self.plane_prop_mesh,
+            self.cube_mesh,
+            self.sea_mesh,
+        ] {
+            renderer.unload_mesh(mesh);
+        }
+    }
 }
 
 impl Scene for FlightSim {
     fn update(&mut self, app: &App) -> SceneCommand {
+        if app.input.key_pressed(Scancode::Escape) {
+            self.unload(&app.renderer);
+            app.set_cursor_captured(false);
+            return SceneCommand::Pop(1);
+        }
+
         if app.input.key_pressed(Scancode::Tab) {
             app.set_cursor_captured(!app.cursor_captured());
         }
